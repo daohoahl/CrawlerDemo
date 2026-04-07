@@ -1,0 +1,10 @@
+[project]
+name = "crawlerdemo"
+version = "0.1.0"
+description = "Simple crawler system (RSS + sitemap) with Docker/EC2/GitHub Actions deployment."
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.ruff]
+line-length = 100
+

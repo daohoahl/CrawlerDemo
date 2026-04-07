@@ -1,0 +1,15 @@
+services:
+  crawler:
+    image: ${IMAGE:?set IMAGE env var}
+    restart: unless-stopped
+    environment:
+      CRAWLER_DATABASE_URL: "sqlite:///./data/crawler.db"
+      CRAWLER_SCHEDULE_MODE: "interval"
+      CRAWLER_INTERVAL_SECONDS: "1800"
+      CRAWLER_MAX_ITEMS_PER_SOURCE: "100"
+      # Override with env if needed:
+      # CRAWLER_RSS_URLS: '["https://news.ycombinator.com/rss"]'
+      # CRAWLER_SITEMAP_URLS: '["https://www.theguardian.com/sitemaps/news.xml"]'
+    volumes:
+      - ./data:/app/data
+

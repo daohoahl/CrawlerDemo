@@ -1,0 +1,74 @@
+name: Build and deploy crawler to EC2
+
+on:
+  push:
+    branches: ["main"]
+
+env:
+  DOCKERHUB_IMAGE: duyhung81002/crawler_test
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_IMAGE }}:latest
+            ${{ env.DOCKERHUB_IMAGE }}:${{ github.sha }}
+
+  deploy-ec2:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Deploy to EC2 via SSH
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+          EC2_APP_DIR: ${{ secrets.EC2_APP_DIR }}
+        run: |
+          IMAGE="${{ env.DOCKERHUB_IMAGE }}:latest"
+
+          ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" bash -s << 'EOF'
+          set -euo pipefail
+          APP_DIR="${EC2_APP_DIR:-/opt/crawlerdemo}"
+          REPO_URL="git@github.com:${GITHUB_REPOSITORY}.git"
+
+          mkdir -p "$APP_DIR"
+          if [ ! -d "$APP_DIR/.git" ]; then
+            git clone "$REPO_URL" "$APP_DIR"
+          else
+            cd "$APP_DIR"
+            git fetch --prune
+            git checkout main
+            git pull --ff-only
+          fi
+
+          cd "$APP_DIR"
+          chmod +x scripts/ec2_deploy.sh
+          IMAGE="${IMAGE}" ./scripts/ec2_deploy.sh
+          EOF
+

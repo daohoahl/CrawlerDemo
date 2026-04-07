@@ -54,10 +54,22 @@ You can override sources with environment variables (JSON lists):
 
 3. **Workflow**
    - On every push to `main`:
-     - Build Docker image and push to **Docker Hub** (`duyhung81002/crawler_test:latest`).
+     - Build Docker image and push to **Docker Hub** tags:
+       - `duyhung81002/crawler_test:<git_sha>` (immutable)
+       - `duyhung81002/crawler_test:latest` (moving tag)
      - SSH into EC2:
        - create/update `docker-compose.ec2.yml` under `EC2_APP_DIR`
        - `docker pull` and `docker compose up -d`
+     - If deploy succeeds, CI promotes the deployed digest to:
+       - `duyhung81002/crawler_test:stable`
+
+### Rollback
+
+If a deploy fails, redeploy the previous stable image:
+
+```bash
+IMAGE="duyhung81002/crawler_test:stable"
+```
 
 After deploy, access:
 - `http://<EC2_PUBLIC_IP>:8090/`

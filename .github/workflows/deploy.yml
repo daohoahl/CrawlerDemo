@@ -73,6 +73,6 @@ jobs:
 
           cd "$APP_DIR"
           chmod +x scripts/ec2_deploy.sh
-          IMAGE="${IMAGE}" ./scripts/ec2_deploy.sh
+          APP_DIR="${APP_DIR}" IMAGE="${IMAGE}" ./scripts/ec2_deploy.sh
           EOF
 

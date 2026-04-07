@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/opt/crawlerdemo}"
+APP_DIR="${APP_DIR:-${EC2_APP_DIR:-/opt/crawlerdemo}}"
 IMAGE="${IMAGE:?IMAGE is required}"
 
 mkdir -p "$APP_DIR"

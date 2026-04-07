@@ -41,7 +41,7 @@ You can override sources with environment variables (JSON lists):
 1. **Prepare EC2**
    - Ubuntu 22.04+, security group allows SSH (22).
    - Install Docker + Docker Compose plugin.
-   - You only need inbound SSH (22). The web service is bound to `127.0.0.1:8090` and should be exposed via Nginx.
+   - Allow inbound **8090** to access the web service.
 
 2. **Add GitHub Actions secrets**
    In your GitHub repo, create **Repository secrets**:
@@ -59,9 +59,9 @@ You can override sources with environment variables (JSON lists):
        - create/update `docker-compose.ec2.yml` under `EC2_APP_DIR`
        - `docker pull` and `docker compose up -d`
 
-After deploy, the web service listens on **127.0.0.1:8090** (for reverse proxy via Nginx):
-- `http://127.0.0.1:8090/`
-- `http://127.0.0.1:8090/api/articles?limit=50`
+After deploy, access:
+- `http://<EC2_PUBLIC_IP>:8090/`
+- `http://<EC2_PUBLIC_IP>:8090/api/articles?limit=50`
 
 After a successful deploy, on EC2 you can check:
 

@@ -84,7 +84,7 @@ jobs:
               volumes:
                 - ./data:/app/data
               ports:
-                - "127.0.0.1:8090:8000"
+                - "8090:8000"
           YAML
 
           export IMAGE

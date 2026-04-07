@@ -48,14 +48,13 @@ jobs:
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
-          EC2_APP_DIR: ${{ secrets.EC2_APP_DIR }}
         run: |
           IMAGE="${{ env.DOCKERHUB_IMAGE }}:latest"
 
           ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" bash -s -- \
             "$IMAGE" \
             "${{ github.repository }}" \
-            "${EC2_APP_DIR:-/opt/crawlerdemo}" << 'EOF'
+            "${{ secrets.EC2_APP_DIR }}" << 'EOF'
           set -euo pipefail
           IMAGE="$1"
           GITHUB_REPOSITORY="$2"

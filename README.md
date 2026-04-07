@@ -35,19 +35,13 @@ You can override sources with environment variables (JSON lists):
 - `docker-compose.yml`: local run
 - `docker-compose.ec2.yml`: EC2 run (image from registry)
 - `.github/workflows/deploy.yml`: build/push (Docker Hub) + EC2 deploy
-- `scripts/ec2_bootstrap.sh`: install Docker on Ubuntu EC2
-- `scripts/ec2_deploy.sh`: pull image + `docker compose up -d` on EC2
 
 ### Deploy to EC2 (end-to-end)
 
 1. **Prepare EC2**
    - Ubuntu 22.04+, security group allows SSH (22).
-   - Open inbound HTTP (80) to access the web dashboard.
-   - SSH into EC2 and install Docker:
-     ```bash
-     curl -sL https://raw.githubusercontent.com/<your-org>/<your-repo>/main/scripts/ec2_bootstrap.sh | bash
-     ```
-     (or copy the script to the instance and run it).
+   - Install Docker + Docker Compose plugin.
+   - You only need inbound SSH (22). The web service is bound to `127.0.0.1:8090` and should be exposed via Nginx.
 
 2. **Add GitHub Actions secrets**
    In your GitHub repo, create **Repository secrets**:
@@ -62,9 +56,8 @@ You can override sources with environment variables (JSON lists):
    - On every push to `main`:
      - Build Docker image and push to **Docker Hub** (`duyhung81002/crawler_test:latest`).
      - SSH into EC2:
-       - clone/pull repo into `EC2_APP_DIR`
-       - run `scripts/ec2_deploy.sh` with `IMAGE` set to the pushed image
-       - `docker compose -f docker-compose.ec2.yml up -d`.
+       - create/update `docker-compose.ec2.yml` under `EC2_APP_DIR`
+       - `docker pull` and `docker compose up -d`
 
 After deploy, the web service listens on **127.0.0.1:8090** (for reverse proxy via Nginx):
 - `http://127.0.0.1:8090/`

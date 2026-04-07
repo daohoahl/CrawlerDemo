@@ -53,26 +53,43 @@ jobs:
 
           ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" bash -s -- \
             "$IMAGE" \
-            "${{ github.repository }}" \
             "${{ secrets.EC2_APP_DIR }}" << 'EOF'
           set -euo pipefail
           IMAGE="$1"
-          GITHUB_REPOSITORY="$2"
-          APP_DIR="$3"
-          REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
+          APP_DIR="$2"
 
           mkdir -p "$APP_DIR"
-          if [ ! -d "$APP_DIR/.git" ]; then
-            git clone "$REPO_URL" "$APP_DIR"
-          else
-            cd "$APP_DIR"
-            git fetch --prune
-            git checkout main
-            git pull --ff-only
-          fi
-
+          mkdir -p "$APP_DIR/data"
           cd "$APP_DIR"
-          chmod +x scripts/ec2_deploy.sh
-          APP_DIR="${APP_DIR}" IMAGE="${IMAGE}" ./scripts/ec2_deploy.sh
+
+          cat > docker-compose.ec2.yml << 'YAML'
+          services:
+            crawler:
+              image: ${IMAGE:?set IMAGE env var}
+              restart: unless-stopped
+              environment:
+                CRAWLER_DATABASE_URL: "sqlite:///./data/crawler.db"
+                CRAWLER_SCHEDULE_MODE: "interval"
+                CRAWLER_INTERVAL_SECONDS: "1800"
+                CRAWLER_MAX_ITEMS_PER_SOURCE: "100"
+              volumes:
+                - ./data:/app/data
+
+            web:
+              image: ${IMAGE:?set IMAGE env var}
+              restart: unless-stopped
+              command: ["uvicorn", "crawlerdemo.web:app", "--host", "0.0.0.0", "--port", "8000"]
+              environment:
+                CRAWLER_DATABASE_URL: "sqlite:///./data/crawler.db"
+              volumes:
+                - ./data:/app/data
+              ports:
+                - "127.0.0.1:8090:8000"
+          YAML
+
+          export IMAGE
+          docker pull "$IMAGE"
+          docker compose -f docker-compose.ec2.yml up -d
+          docker image prune -f
           EOF
 

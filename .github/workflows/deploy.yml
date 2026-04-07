@@ -52,10 +52,15 @@ jobs:
         run: |
           IMAGE="${{ env.DOCKERHUB_IMAGE }}:latest"
 
-          ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" bash -s << 'EOF'
+          ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" bash -s -- \
+            "$IMAGE" \
+            "${{ github.repository }}" \
+            "${EC2_APP_DIR:-/opt/crawlerdemo}" << 'EOF'
           set -euo pipefail
-          APP_DIR="${EC2_APP_DIR:-/opt/crawlerdemo}"
-          REPO_URL="git@github.com:${GITHUB_REPOSITORY}.git"
+          IMAGE="$1"
+          GITHUB_REPOSITORY="$2"
+          APP_DIR="$3"
+          REPO_URL="https://github.com/${GITHUB_REPOSITORY}.git"
 
           mkdir -p "$APP_DIR"
           if [ ! -d "$APP_DIR/.git" ]; then

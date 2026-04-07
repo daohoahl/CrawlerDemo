@@ -24,11 +24,18 @@ class Settings(BaseSettings):
 
     # sources
     rss_urls: list[AnyUrl] = [
-        "https://news.ycombinator.com/rss",
-        "https://feeds.bbci.co.uk/news/rss.xml",
+        # US (official) - U.S. Department of State RSS channels
+        "https://www.state.gov/rss/channels/prsreleases.xml",
+        "https://www.state.gov/rss/channels/remarks.xml",
+        "https://www.state.gov/rss/channels/briefings.xml",
+
+        # Vietnam (official/state) - Government Gazette RSS
+        "https://congbao.chinhphu.vn/cac-van-ban-moi-ban-hanh.rss",
     ]
     sitemap_urls: list[AnyUrl] = [
         "https://www.theguardian.com/sitemaps/news.xml",
+        # Vietnam Government News (English) - sitemap endpoint (best-effort)
+        "https://en.baochinhphu.vn/sitemap.xml",
     ]
 
     @field_validator("rss_urls", "sitemap_urls", mode="before")

@@ -7,10 +7,13 @@ runs in Docker, and deploys to EC2 via GitHub Actions.
 
 Defaults:
 - **RSS**:
-  - `https://news.ycombinator.com/rss`
-  - `https://feeds.bbci.co.uk/news/rss.xml`
+  - `https://www.state.gov/rss/channels/prsreleases.xml` (US State Dept – Press Releases)
+  - `https://www.state.gov/rss/channels/briefings.xml` (US State Dept – Briefings)
+  - `https://www.state.gov/rss/channels/remarks.xml` (US State Dept – Remarks)
+  - `https://congbao.chinhphu.vn/cac-van-ban-moi-ban-hanh.rss` (Vietnam Government Gazette – New documents)
 - **Sitemap**:
   - `https://www.theguardian.com/sitemaps/news.xml`
+  - `https://en.baochinhphu.vn/sitemap.xml` (Vietnam Government News – English, best-effort)
 
 You can override sources with environment variables (JSON lists):
 - **`CRAWLER_RSS_URLS`**:

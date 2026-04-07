@@ -8,7 +8,7 @@ services:
       CRAWLER_INTERVAL_SECONDS: "1800"
       CRAWLER_MAX_ITEMS_PER_SOURCE: "100"
       # Override with env if needed:
-      # CRAWLER_RSS_URLS: '["https://news.ycombinator.com/rss"]'
+      # CRAWLER_RSS_URLS: '["https://feeds.reuters.com/Reuters/worldNews","https://feeds.reuters.com/Reuters/PoliticsNews"]'
       # CRAWLER_SITEMAP_URLS: '["https://www.theguardian.com/sitemaps/news.xml"]'
     volumes:
       - ./data:/app/data

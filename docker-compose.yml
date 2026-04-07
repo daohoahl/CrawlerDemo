@@ -10,3 +10,14 @@ services:
     volumes:
       - ./data:/app/data
 
+  web:
+    build: .
+    image: crawlerdemo:local
+    command: ["uvicorn", "crawlerdemo.web:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      CRAWLER_DATABASE_URL: "sqlite:///./data/crawler.db"
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8000:8000"
+

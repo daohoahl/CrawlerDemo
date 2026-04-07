@@ -48,6 +48,10 @@ The crawler will:
 - fetch configured sources on a schedule
 - store results in `./data/crawler.db` (SQLite)
 
+The web dashboard will be available at:
+- `http://localhost:8000/`
+- JSON output: `http://localhost:8000/api/articles?limit=50`
+
 View recent items:
 
 ```bash
@@ -64,6 +68,7 @@ docker compose run --rm crawler python -m crawlerdemo.cli crawl-once
 
 1. **Prepare EC2**
    - Ubuntu 22.04+, security group allows SSH (22).
+   - Open inbound HTTP (80) to access the web dashboard.
    - SSH into EC2 and install Docker:
      ```bash
      curl -sL https://raw.githubusercontent.com/<your-org>/<your-repo>/main/scripts/ec2_bootstrap.sh | bash
@@ -86,6 +91,26 @@ docker compose run --rm crawler python -m crawlerdemo.cli crawl-once
        - clone/pull repo into `EC2_APP_DIR`
        - run `scripts/ec2_deploy.sh` with `IMAGE` set to the pushed image
        - `docker compose -f docker-compose.ec2.yml up -d`.
+
+After deploy, the web service listens on **127.0.0.1:8090** (for reverse proxy via Nginx):
+- `http://127.0.0.1:8090/`
+- `http://127.0.0.1:8090/api/articles?limit=50`
+
+Example Nginx reverse proxy:
+
+```nginx
+server {
+  listen 80;
+  server_name crawler.example.com;
+
+  location / {
+    proxy_pass http://127.0.0.1:8090;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+  }
+}
+```
 
 After a successful deploy, on EC2 you can check:
 

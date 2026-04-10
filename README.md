@@ -79,6 +79,7 @@ Web UI now supports:
 - reload/filter article list
 - trigger manual crawl from browser (`POST /api/crawl`)
 - monitor crawler status (`GET /api/crawl-status`)
+- list/search configured sources to guide end users (`GET /api/sources`)
 
 After a successful deploy, on EC2 you can check:
 

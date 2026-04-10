@@ -64,6 +64,16 @@ def create_app() -> FastAPI:
         with crawl_lock:
             return dict(crawl_state)
 
+    @app.get("/api/sources")
+    def api_sources():
+        rss = [str(u) for u in s.rss_urls]
+        sitemap = [str(u) for u in s.sitemap_urls]
+        return {
+            "rss": rss,
+            "sitemap": sitemap,
+            "all": rss + sitemap,
+        }
+
     @app.post("/api/crawl")
     def start_crawl():
         with crawl_lock:
@@ -125,6 +135,8 @@ def create_app() -> FastAPI:
       .controls {{ grid-column: span 12; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }}
       .stats {{ grid-column: span 12; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }}
       .table-wrap {{ grid-column: span 12; overflow: auto; }}
+      .sources-wrap {{ grid-column: span 12; }}
+      .guide-wrap {{ grid-column: span 12; }}
       .stat-label {{ color: var(--muted); font-size: 12px; }}
       .stat-value {{ font-size: 24px; font-weight: 700; margin-top: 4px; }}
       input, button {{
@@ -150,8 +162,32 @@ def create_app() -> FastAPI:
       a {{ color: var(--accent); text-decoration: none; }}
       a:hover {{ text-decoration: underline; }}
       .nowrap {{ white-space: nowrap; }}
+      .split {{
+        display: grid;
+        gap: 12px;
+        grid-template-columns: 1fr 1fr;
+      }}
+      .source-item {{
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 10px;
+        margin-bottom: 8px;
+        background: #0f1934;
+      }}
+      .source-type {{
+        display: inline-block;
+        font-size: 11px;
+        color: var(--muted);
+        border: 1px solid var(--border);
+        padding: 2px 6px;
+        border-radius: 999px;
+        margin-bottom: 6px;
+      }}
+      .guide-list {{ margin: 0; padding-left: 18px; color: var(--muted); line-height: 1.6; }}
+      .mini-title {{ margin: 0 0 8px; font-size: 16px; }}
       @media (max-width: 700px) {{
         .title {{ font-size: 22px; }}
+        .split {{ grid-template-columns: 1fr; }}
       }}
     </style>
   </head>
@@ -207,6 +243,25 @@ def create_app() -> FastAPI:
             <tbody id="rows"></tbody>
           </table>
         </div>
+
+        <div class="split">
+          <div class="card guide-wrap">
+            <h3 class="mini-title">Huong dan dung nhanh</h3>
+            <ol class="guide-list">
+              <li>Bam <b>Crawl ngay</b> de lay du lieu moi tu cac nguon da cau hinh.</li>
+              <li>Nhap tu khoa vao o <b>Tim kiem</b> de loc theo title, source hoac URL.</li>
+              <li>Dieu chinh <b>Limit</b> de xem nhieu/it ket qua hon, sau do bam <b>Reload</b>.</li>
+              <li>Kiem tra dong <b>Trang thai crawl</b> de biet job dang chay hay da xong.</li>
+            </ol>
+          </div>
+
+          <div class="card sources-wrap">
+            <h3 class="mini-title">Nguon tin ho tro</h3>
+            <div class="muted" style="margin-bottom:8px;">Tim nhanh theo domain/URL de huong dan user chon nguon can theo doi.</div>
+            <input id="source-q" type="text" placeholder="Tim nguon tin... vd: state.gov, guardian" />
+            <div id="source-list" style="margin-top:10px;"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -214,6 +269,7 @@ def create_app() -> FastAPI:
       const $ = (id) => document.getElementById(id);
       const statusEl = $("status");
       const crawlStatusLine = $("crawl-status-line");
+      let sourceData = [];
 
       function fmt(ts) {{
         if (!ts) return "";
@@ -311,13 +367,59 @@ def create_app() -> FastAPI:
         }}
       }}
 
+      function renderSources(items) {{
+        const list = $("source-list");
+        list.innerHTML = "";
+        if (!items.length) {{
+          list.innerHTML = `<div class="muted">Khong tim thay nguon phu hop.</div>`;
+          return;
+        }}
+        for (const it of items) {{
+          const div = document.createElement("div");
+          div.className = "source-item";
+          div.innerHTML = `
+            <div class="source-type">${{it.type.toUpperCase()}}</div>
+            <div><a href="${{it.url}}" target="_blank" rel="noreferrer">${{it.url}}</a></div>
+            <div class="muted">Click vao link de mo nguon goc.</div>
+          `;
+          list.appendChild(div);
+        }}
+      }}
+
+      async function loadSources() {{
+        try {{
+          const resp = await fetch("/api/sources", {{ cache: "no-store" }});
+          const payload = await resp.json();
+          sourceData = [
+            ...payload.rss.map((url) => ({{ type: "rss", url }})),
+            ...payload.sitemap.map((url) => ({{ type: "sitemap", url }})),
+          ];
+          renderSources(sourceData);
+        }} catch (e) {{
+          $("source-list").innerHTML = `<div class="muted error">Khong tai duoc danh sach nguon.</div>`;
+        }}
+      }}
+
+      function filterSources() {{
+        const q = $("source-q").value.trim().toLowerCase();
+        if (!q) {{
+          renderSources(sourceData);
+          return;
+        }}
+        renderSources(
+          sourceData.filter((x) => x.url.toLowerCase().includes(q) || x.type.includes(q))
+        );
+      }}
+
       $("reload").addEventListener("click", load);
       $("crawl").addEventListener("click", triggerCrawl);
       $("q").addEventListener("keydown", (e) => {{ if (e.key === "Enter") load(); }});
       $("limit").addEventListener("keydown", (e) => {{ if (e.key === "Enter") load(); }});
+      $("source-q").addEventListener("input", filterSources);
 
       load();
       loadCrawlStatus();
+      loadSources();
       setInterval(() => {{
         load();
         loadCrawlStatus();

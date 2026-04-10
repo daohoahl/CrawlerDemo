@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import html
+import threading
+from datetime import datetime, timezone
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from crawlerdemo.config import get_settings
 from crawlerdemo.db import init_db, list_recent, make_engine
+from crawlerdemo.worker import run_once
 
 
 def create_app() -> FastAPI:
@@ -16,6 +19,24 @@ def create_app() -> FastAPI:
     init_db(engine)
 
     app = FastAPI(title="CrawlerDemo", version="0.1.0")
+    crawl_lock = threading.Lock()
+    crawl_state = {
+        "is_running": False,
+        "last_started_at": None,
+        "last_finished_at": None,
+        "last_error": None,
+    }
+
+    def _run_crawl_job() -> None:
+        try:
+            run_once()
+            crawl_state["last_error"] = None
+        except Exception as exc:  # pragma: no cover - runtime error path
+            crawl_state["last_error"] = str(exc)
+        finally:
+            with crawl_lock:
+                crawl_state["is_running"] = False
+                crawl_state["last_finished_at"] = datetime.now(timezone.utc).isoformat()
 
     @app.get("/health")
     def health():
@@ -38,9 +59,24 @@ def create_app() -> FastAPI:
             for r in rows
         ]
 
+    @app.get("/api/crawl-status")
+    def crawl_status():
+        with crawl_lock:
+            return dict(crawl_state)
+
+    @app.post("/api/crawl")
+    def start_crawl():
+        with crawl_lock:
+            if crawl_state["is_running"]:
+                raise HTTPException(status_code=409, detail="A crawl job is already running.")
+            crawl_state["is_running"] = True
+            crawl_state["last_started_at"] = datetime.now(timezone.utc).isoformat()
+            crawl_state["last_error"] = None
+        threading.Thread(target=_run_crawl_job, daemon=True).start()
+        return {"ok": True, "message": "Crawl job started."}
+
     @app.get("/")
     def index(limit: int = 50):
-        # Simple no-build dashboard. Keep it static HTML + client-side fetch.
         safe_title = html.escape("CrawlerDemo Dashboard")
         return HTMLResponse(
             f"""<!doctype html>
@@ -50,51 +86,134 @@ def create_app() -> FastAPI:
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{safe_title}</title>
     <style>
-      body {{ font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 24px; }}
-      .row {{ display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }}
-      .card {{ border: 1px solid #e5e7eb; border-radius: 12px; padding: 14px; }}
-      input, button {{ padding: 8px 10px; border-radius: 10px; border: 1px solid #d1d5db; }}
-      button {{ cursor: pointer; background: #111827; color: white; border-color: #111827; }}
-      table {{ width: 100%; border-collapse: collapse; margin-top: 12px; }}
-      th, td {{ border-bottom: 1px solid #eee; padding: 10px; vertical-align: top; }}
-      th {{ text-align: left; font-size: 12px; color: #374151; }}
-      .muted {{ color: #6b7280; font-size: 12px; }}
-      a {{ color: #1d4ed8; text-decoration: none; }}
+      :root {{
+        --bg: #0b1020;
+        --card: #121a30;
+        --muted: #9fb0d1;
+        --text: #eef3ff;
+        --accent: #5ba7ff;
+        --accent-2: #64f0cc;
+        --danger: #ff8ea0;
+        --border: #243252;
+      }}
+      * {{ box-sizing: border-box; }}
+      body {{
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+        background: radial-gradient(circle at top right, #1a2d5d 0%, var(--bg) 42%);
+        color: var(--text);
+      }}
+      .container {{ max-width: 1080px; margin: 0 auto; padding: 28px 16px 42px; }}
+      .header {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 14px;
+      }}
+      .title {{ font-size: 26px; font-weight: 700; margin: 0; }}
+      .subtitle {{ color: var(--muted); margin-top: 4px; font-size: 14px; }}
+      .grid {{ display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }}
+      .card {{
+        background: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0));
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 14px;
+        box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+      }}
+      .controls {{ grid-column: span 12; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }}
+      .stats {{ grid-column: span 12; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }}
+      .table-wrap {{ grid-column: span 12; overflow: auto; }}
+      .stat-label {{ color: var(--muted); font-size: 12px; }}
+      .stat-value {{ font-size: 24px; font-weight: 700; margin-top: 4px; }}
+      input, button {{
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #0e162d;
+        color: var(--text);
+        padding: 10px 12px;
+        font-size: 14px;
+      }}
+      input:focus {{ outline: 2px solid #294c8d; }}
+      button {{ cursor: pointer; transition: .2s ease; }}
+      button.primary {{ border-color: #3876d4; background: #2d64b6; }}
+      button.primary:hover {{ background: #3876d4; }}
+      button.ghost:hover {{ border-color: #3b5a95; background: #142247; }}
+      .status {{ color: var(--muted); font-size: 13px; }}
+      .error {{ color: var(--danger); }}
+      .ok {{ color: var(--accent-2); }}
+      table {{ width: 100%; border-collapse: collapse; min-width: 780px; }}
+      th, td {{ padding: 10px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }}
+      th {{ color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }}
+      .muted {{ color: var(--muted); font-size: 12px; }}
+      a {{ color: var(--accent); text-decoration: none; }}
       a:hover {{ text-decoration: underline; }}
-      .title {{ font-weight: 600; }}
       .nowrap {{ white-space: nowrap; }}
+      @media (max-width: 700px) {{
+        .title {{ font-size: 22px; }}
+      }}
     </style>
   </head>
   <body>
-    <div class="row">
-      <div>
-        <div class="title">CrawlerDemo</div>
-        <div class="muted">Live view from <code>/api/articles</code></div>
+    <div class="container">
+      <div class="header">
+        <div>
+          <h1 class="title">Crawler Demo</h1>
+          <div class="subtitle">Giao diện theo doi du lieu crawl va kich hoat crawl ngay lap tuc</div>
+        </div>
+        <div class="status" id="crawl-status-line">Trang thai crawl: ...</div>
       </div>
-      <div class="card row">
-        <label class="muted">Limit</label>
-        <input id="limit" type="number" min="1" max="500" value="{int(limit)}" />
-        <label class="muted">Filter (source/title/url)</label>
-        <input id="q" type="text" placeholder="e.g. state.gov" size="26" />
-        <button id="reload">Reload</button>
-        <span id="status" class="muted"></span>
+
+      <div class="grid">
+        <div class="card controls">
+          <label class="muted">Limit</label>
+          <input id="limit" type="number" min="1" max="500" value="{int(limit)}" />
+          <label class="muted">Tim kiem</label>
+          <input id="q" type="text" placeholder="source / title / url..." size="26" />
+          <button id="reload" class="ghost">Reload</button>
+          <button id="crawl" class="primary">Crawl ngay</button>
+          <span id="status" class="status"></span>
+        </div>
+
+        <div class="stats">
+          <div class="card">
+            <div class="stat-label">Tong ket qua hien thi</div>
+            <div class="stat-value" id="stat-visible">0</div>
+          </div>
+          <div class="card">
+            <div class="stat-label">Tong ket qua da tai</div>
+            <div class="stat-value" id="stat-loaded">0</div>
+          </div>
+          <div class="card">
+            <div class="stat-label">Nguon du lieu</div>
+            <div class="stat-value" id="stat-sources">0</div>
+          </div>
+          <div class="card">
+            <div class="stat-label">Lan cap nhat gan nhat</div>
+            <div class="stat-value" id="stat-last">--</div>
+          </div>
+        </div>
+
+        <div class="card table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th class="nowrap">Fetched</th>
+                <th>Title / URL</th>
+                <th class="nowrap">Source</th>
+              </tr>
+            </thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
       </div>
     </div>
-
-    <table>
-      <thead>
-        <tr>
-          <th class="nowrap">Fetched</th>
-          <th>Title / URL</th>
-          <th class="nowrap">Source</th>
-        </tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
 
     <script>
       const $ = (id) => document.getElementById(id);
       const statusEl = $("status");
+      const crawlStatusLine = $("crawl-status-line");
 
       function fmt(ts) {{
         if (!ts) return "";
@@ -109,10 +228,10 @@ def create_app() -> FastAPI:
         const limit = parseInt($("limit").value || "50", 10);
         const q = $("q").value.trim();
         const url = `/api/articles?limit=${{encodeURIComponent(limit)}}`;
-        statusEl.textContent = "Loading...";
+        statusEl.textContent = "Dang tai du lieu...";
         const t0 = performance.now();
 
-        const resp = await fetch(url);
+        const resp = await fetch(url, {{ cache: "no-store" }});
         const data = await resp.json();
         const filtered = q
           ? data.filter(x =>
@@ -138,15 +257,71 @@ def create_app() -> FastAPI:
           tbody.appendChild(tr);
         }}
 
+        const uniqueSources = new Set(data.map((x) => x.source || "unknown")).size;
+        $("stat-visible").textContent = String(filtered.length);
+        $("stat-loaded").textContent = String(data.length);
+        $("stat-sources").textContent = String(uniqueSources);
+        $("stat-last").textContent = fmt(new Date().toISOString());
+
         const ms = Math.round(performance.now() - t0);
-        statusEl.textContent = `Loaded ${{filtered.length}} items in ${{ms}}ms`;
+        statusEl.textContent = `Da tai ${{filtered.length}}/${{data.length}} ket qua trong ${{ms}}ms`;
+      }}
+
+      async function loadCrawlStatus() {{
+        try {{
+          const resp = await fetch("/api/crawl-status", {{ cache: "no-store" }});
+          const s = await resp.json();
+          const statusText = s.is_running
+            ? `Dang crawl... (bat dau ${{
+                s.last_started_at ? fmt(s.last_started_at) : "unknown"
+              }})`
+            : `Ranh roi. Lan xong gan nhat: ${{s.last_finished_at ? fmt(s.last_finished_at) : "chua co"}}`;
+          crawlStatusLine.textContent = `Trang thai crawl: ${{statusText}}`;
+          crawlStatusLine.className = `status ${{s.last_error ? "error" : (s.is_running ? "muted" : "ok")}}`;
+          if (s.last_error) {{
+            statusEl.textContent = `Loi crawl gan nhat: ${{s.last_error}}`;
+            statusEl.className = "status error";
+          }} else {{
+            statusEl.className = "status";
+          }}
+        }} catch (e) {{
+          crawlStatusLine.textContent = "Khong lay duoc trang thai crawl";
+          crawlStatusLine.className = "status error";
+        }}
+      }}
+
+      async function triggerCrawl() {{
+        const btn = $("crawl");
+        btn.disabled = true;
+        statusEl.textContent = "Dang gui yeu cau crawl...";
+        try {{
+          const resp = await fetch("/api/crawl", {{ method: "POST" }});
+          if (!resp.ok) {{
+            const err = await resp.json().catch(() => ({{ detail: "Unknown error" }}));
+            throw new Error(err.detail || "Cannot start crawl");
+          }}
+          statusEl.textContent = "Da bat dau crawl. Du lieu se tu dong cap nhat.";
+          statusEl.className = "status ok";
+        }} catch (e) {{
+          statusEl.textContent = `Khong the bat dau crawl: ${{e.message}}`;
+          statusEl.className = "status error";
+        }} finally {{
+          btn.disabled = false;
+          await loadCrawlStatus();
+        }}
       }}
 
       $("reload").addEventListener("click", load);
+      $("crawl").addEventListener("click", triggerCrawl);
       $("q").addEventListener("keydown", (e) => {{ if (e.key === "Enter") load(); }});
+      $("limit").addEventListener("keydown", (e) => {{ if (e.key === "Enter") load(); }});
 
       load();
-      setInterval(load, 30000);
+      loadCrawlStatus();
+      setInterval(() => {{
+        load();
+        loadCrawlStatus();
+      }}, 15000);
     </script>
   </body>
 </html>"""

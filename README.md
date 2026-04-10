@@ -75,6 +75,11 @@ After deploy, access:
 - `http://<EC2_PUBLIC_IP>:8090/`
 - `http://<EC2_PUBLIC_IP>:8090/api/articles?limit=50`
 
+Web UI now supports:
+- reload/filter article list
+- trigger manual crawl from browser (`POST /api/crawl`)
+- monitor crawler status (`GET /api/crawl-status`)
+
 After a successful deploy, on EC2 you can check:
 
 ```bash

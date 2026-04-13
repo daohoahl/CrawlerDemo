@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "uml-diagram-design": {
+      "source": "aaaaqwq/claude-code-skills",
+      "sourceType": "github",
+      "computedHash": "14993bf72cc8188f5fae82bc1c47e129398277dc8f11523b63ac4f9beb0ace2d"
+    }
+  }
+}

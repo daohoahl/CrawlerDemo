@@ -36,7 +36,8 @@ def crawl_sitemap(
         # sitemap index: crawl first few child sitemaps until we hit limit
         remaining = limit
         for sm in sitemap_tags:
-            loc = sm.find_text("loc")
+            loc_tag = sm.find("loc")
+            loc = loc_tag.text if loc_tag else None
             if not loc:
                 continue
             if remaining <= 0:
@@ -53,10 +54,12 @@ def crawl_sitemap(
     for u in url_tags:
         if count >= limit:
             break
-        loc = u.find_text("loc")
+        loc_tag = u.find("loc")
+        loc = loc_tag.text if loc_tag else None
         if not loc:
             continue
-        lastmod = _parse_datetime(u.find_text("lastmod"))
+        lastmod_tag = u.find("lastmod")
+        lastmod = _parse_datetime(lastmod_tag.text if lastmod_tag else None)
         yield ArticleIn(
             source=source_name,
             canonical_url=canonicalize_url(loc),

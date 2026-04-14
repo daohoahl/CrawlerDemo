@@ -11,4 +11,5 @@ python-dateutil==2.9.0.post0
 SQLAlchemy==2.0.35
 typer==0.12.5
 uvicorn==0.34.0
+boto3==1.35.99
 

@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     schedule_mode: Literal["once", "interval"] = "interval"
     interval_seconds: int = 1800
 
+    # S3 export
+    s3_bucket: str = ""
+    s3_region: str = "ap-southeast-1"
+    s3_export_prefix: str = "exports/"
+    s3_presigned_url_expires: int = 3600  # 1 hour
+
     # sources
     rss_urls: list[AnyUrl] = [
         # US (official) - U.S. Department of State RSS channels

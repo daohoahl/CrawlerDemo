@@ -4,12 +4,13 @@ import html
 import threading
 from datetime import datetime, timezone
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from crawlerdemo.config import get_settings
 from crawlerdemo.db import init_db, list_recent, make_engine
+from crawlerdemo.export import export_csv, export_json, generate_presigned_url, upload_to_s3
 from crawlerdemo.worker import run_once
 
 
@@ -64,6 +65,81 @@ def create_app() -> FastAPI:
         with crawl_lock:
             return dict(crawl_state)
 
+    # ------------------------------------------------------------------
+    # Export endpoints
+    # ------------------------------------------------------------------
+
+    @app.get("/api/export/csv")
+    def export_csv_endpoint(limit: int = Query(default=10_000, ge=1, le=100_000)):
+        """Stream CSV file trực tiếp về client."""
+        with Session(engine) as session:
+            data, row_count = export_csv(session, limit=limit)
+        filename = f"articles_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
+        return StreamingResponse(
+            iter([data]),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Row-Count": str(row_count),
+            },
+        )
+
+    @app.get("/api/export/json")
+    def export_json_endpoint(limit: int = Query(default=10_000, ge=1, le=100_000)):
+        """Stream JSON file trực tiếp về client."""
+        with Session(engine) as session:
+            data, row_count = export_json(session, limit=limit)
+        filename = f"articles_{datetime.now(timezone.utc).strftime('%Y%m%d')}.json"
+        return StreamingResponse(
+            iter([data]),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Row-Count": str(row_count),
+            },
+        )
+
+    @app.post("/api/export/s3")
+    def export_to_s3(fmt: str = Query(default="csv", pattern="^(csv|json)$"),
+                     limit: int = Query(default=10_000, ge=1, le=100_000)):
+        """Upload snapshot lên S3 và trả presigned URL để download."""
+        if not s.s3_bucket:
+            raise HTTPException(
+                status_code=503,
+                detail="S3 bucket not configured. Set CRAWLER_S3_BUCKET env var.",
+            )
+        with Session(engine) as session:
+            if fmt == "csv":
+                data, row_count = export_csv(session, limit=limit)
+                content_type = "text/csv"
+            else:
+                data, row_count = export_json(session, limit=limit)
+                content_type = "application/json"
+
+        key = upload_to_s3(
+            data=data,
+            bucket=s.s3_bucket,
+            prefix=s.s3_export_prefix,
+            fmt=fmt,
+            region=s.s3_region,
+            content_type=content_type,
+        )
+        presigned_url = generate_presigned_url(
+            bucket=s.s3_bucket,
+            key=key,
+            region=s.s3_region,
+            expires=s.s3_presigned_url_expires,
+        )
+        return {
+            "ok": True,
+            "s3_key": key,
+            "row_count": row_count,
+            "format": fmt,
+            "download_url": presigned_url,
+            "expires_in_seconds": s.s3_presigned_url_expires,
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+        }
+
     @app.get("/api/sources")
     def api_sources():
         rss = [str(u) for u in s.rss_urls]
@@ -95,6 +171,7 @@ def create_app() -> FastAPI:
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{safe_title}</title>
+    <meta name="description" content="CrawlerDemo Dashboard — monitor crawled articles, trigger crawl jobs, and export data." />
     <style>
       :root {{
         --bg: #0a1020;
@@ -152,6 +229,54 @@ def create_app() -> FastAPI:
         border-radius: 14px;
         padding: 16px;
         box-shadow: 0 8px 26px rgba(0, 0, 0, 0.24);
+      }}
+      .btn-export {{
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 14px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: #0d1630;
+        color: var(--text);
+        font-size: 13px;
+        cursor: pointer;
+        text-decoration: none;
+        transition: 0.2s ease;
+        white-space: nowrap;
+      }}
+      .btn-export:hover {{
+        border-color: #3a5384;
+        background: #132348;
+        text-decoration: none;
+      }}
+      .btn-s3 {{
+        border-color: #2d5a2d;
+        color: var(--ok);
+      }}
+      .btn-s3:hover {{
+        background: #0f2a0f;
+        border-color: var(--ok);
+      }}
+      .s3-result {{
+        background: #0a1f0a;
+        border: 1px solid #2d5a2d;
+        border-radius: 10px;
+        padding: 12px 14px;
+        margin-top: 10px;
+        display: none;
+        font-size: 13px;
+        color: var(--ok);
+        word-break: break-all;
+      }}
+      .s3-result a {{
+        color: var(--ok);
+        font-weight: 600;
+      }}
+      .s3-result .s3-meta {{
+        margin-top: 6px;
+        color: var(--muted);
+        font-size: 12px;
       }}
       .actions {{
         display: grid;
@@ -332,7 +457,21 @@ def create_app() -> FastAPI:
           <h1 class="page-title">Crawler Dashboard</h1>
           <div class="page-subtitle">Track recent crawl results, trigger jobs manually, and explore configured sources.</div>
         </div>
-        <div class="status-pill" id="crawl-status-line">Crawler status: Loading...</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <a id="btn-dl-csv" href="/api/export/csv" class="btn-export" title="Download CSV">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            CSV
+          </a>
+          <a id="btn-dl-json" href="/api/export/json" class="btn-export" title="Download JSON">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            JSON
+          </a>
+          <button id="btn-s3-csv" class="btn-export btn-s3" title="Upload CSV to S3 &amp; get shareable link">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+            S3 Link
+          </button>
+          <div class="status-pill" id="crawl-status-line">Crawler status: Loading...</div>
+        </div>
       </div>
 
       <div class="layout">
@@ -402,6 +541,16 @@ def create_app() -> FastAPI:
               <div class="muted">Search by domain or full URL.</div>
               <input id="source-q" class="source-search" type="text" placeholder="e.g. state.gov, guardian, sitemap" />
               <div id="source-list"></div>
+            </div>
+
+            <div class="card" style="margin-top:14px;">
+              <h3 class="panel-title">Export &amp; Share via S3</h3>
+              <div class="muted" style="margin-bottom:10px;font-size:13px;">Upload snapshot lên S3 và nhận link download (hết hạn sau 1 giờ).</div>
+              <button id="btn-s3-csv" class="btn-export btn-s3" style="width:100%;justify-content:center;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>
+                Upload CSV → S3 Link
+              </button>
+              <div id="s3-export-result" class="s3-result"></div>
             </div>
           </div>
         </div>
@@ -576,6 +725,47 @@ def create_app() -> FastAPI:
       $("q").addEventListener("keydown", (e) => {{ if (e.key === "Enter") load(); }});
       $("limit").addEventListener("keydown", (e) => {{ if (e.key === "Enter") load(); }});
       $("source-q").addEventListener("input", filterSources);
+
+      // S3 export
+      async function exportToS3(fmt) {{
+        const btn = $("btn-s3-csv");
+        const resultEl = $("s3-export-result");
+        btn.disabled = true;
+        btn.textContent = "Uploading...";
+        resultEl.style.display = "none";
+        try {{
+          const resp = await fetch(`/api/export/s3?fmt=${{fmt}}`, {{ method: "POST" }});
+          if (!resp.ok) {{
+            const err = await resp.json().catch(() => ({{ detail: "Unknown error" }}));
+            throw new Error(err.detail || "Upload failed");
+          }}
+          const result = await resp.json();
+          const expiresMin = Math.round(result.expires_in_seconds / 60);
+          resultEl.innerHTML = `
+            ✅ Upload thành công — <strong>${{result.row_count}}</strong> articles (${{result.format.toUpperCase()}})<br/>
+            <a href="${{result.download_url}}" target="_blank" rel="noreferrer">📥 Download từ S3</a>
+            <div class="s3-meta">
+              Key: ${{result.s3_key}}<br/>
+              Link hết hạn sau ${{expiresMin}} phút · Uploaded: ${{fmt_ts(result.uploaded_at)}}
+            </div>
+          `;
+          resultEl.style.display = "block";
+        }} catch (e) {{
+          resultEl.innerHTML = `❌ Lỗi: ${{e.message}}`;
+          resultEl.style.display = "block";
+          resultEl.style.color = "var(--error)";
+        }} finally {{
+          btn.disabled = false;
+          btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg> S3 Link`;
+        }}
+      }}
+
+      function fmt_ts(ts) {{
+        if (!ts) return "";
+        try {{ return new Date(ts).toLocaleString(); }} catch(e) {{ return ts; }}
+      }}
+
+      $("btn-s3-csv").addEventListener("click", () => exportToS3("csv"));
 
       load();
       loadCrawlStatus();

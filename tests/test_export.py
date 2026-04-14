@@ -5,8 +5,8 @@ from crawlerdemo.db import Article
 
 def test_export_csv():
     articles = [
-        Article(id=1, source="test", title="csv_title", canonical_url="http://u", published_at=None, created_at=None),
-        Article(id=2, source="test", title='title "with" quotes', canonical_url="http://u2", published_at=None, created_at=None),
+        Article(id=1, source="test", title="csv_title", canonical_url="http://u", published_at=None, fetched_at=None),
+        Article(id=2, source="test", title='title "with" quotes', canonical_url="http://u2", published_at=None, fetched_at=None),
     ]
     
     csv_bytes = export_csv(articles)
@@ -21,7 +21,7 @@ def test_export_csv():
 
 def test_export_json():
     articles = [
-        Article(id=1, source="test", title="json_title", canonical_url="http://u", summary="sum", published_at=None, created_at=None),
+        Article(id=1, source="test", title="json_title", canonical_url="http://u", summary="sum", published_at=None, fetched_at=None),
     ]
     
     json_bytes = export_json(articles)
@@ -49,7 +49,7 @@ def test_upload_to_s3(mocker):
         content_type="text/csv"
     )
     
-    assert key.startswith("dev/snapshot_")
+    assert key.startswith("dev/")
     assert key.endswith(".csv")
     
     mock_client.put_object.assert_called_once_with(

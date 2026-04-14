@@ -11,7 +11,7 @@ def test_health_check():
     assert response.json() == {"ok": True}
 
 def test_crawl_status():
-    response = client.get("/api/crawl/status")
+    response = client.get("/api/crawl-status")
     assert response.status_code == 200
     data = response.json()
     assert "is_running" in data

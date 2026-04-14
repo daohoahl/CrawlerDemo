@@ -3,13 +3,16 @@ from unittest.mock import MagicMock
 from crawlerdemo.export import export_csv, export_json, upload_to_s3
 from crawlerdemo.db import Article
 
-def test_export_csv():
+def test_export_csv(mocker):
     articles = [
         Article(id=1, source="test", title="csv_title", canonical_url="http://u", published_at=None, fetched_at=None),
         Article(id=2, source="test", title='title "with" quotes', canonical_url="http://u2", published_at=None, fetched_at=None),
     ]
+    mocker.patch("crawlerdemo.export.list_recent", return_value=articles)
     
-    csv_bytes = export_csv(articles)
+    mock_session = MagicMock()
+    csv_bytes, count = export_csv(mock_session)
+    assert count == 2
     assert isinstance(csv_bytes, bytes)
     
     csv_str = csv_bytes.decode("utf-8")
@@ -19,12 +22,15 @@ def test_export_csv():
     assert "csv_title" in lines[1]
     assert 'title ""with"" quotes' in lines[2]
 
-def test_export_json():
+def test_export_json(mocker):
     articles = [
         Article(id=1, source="test", title="json_title", canonical_url="http://u", summary="sum", published_at=None, fetched_at=None),
     ]
+    mocker.patch("crawlerdemo.export.list_recent", return_value=articles)
     
-    json_bytes = export_json(articles)
+    mock_session = MagicMock()
+    json_bytes, count = export_json(mock_session)
+    assert count == 1
     assert isinstance(json_bytes, bytes)
     
     data = json.loads(json_bytes.decode("utf-8"))

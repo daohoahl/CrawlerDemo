@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     s3_export_prefix: str = "exports/"
     s3_presigned_url_expires: int = 3600  # 1 hour
 
+    # SQS
+    sqs_data_queue_url: str = ""
     # sources
     rss_urls: list[AnyUrl] = [
         # US (official) - U.S. Department of State RSS channels

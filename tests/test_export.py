@@ -18,7 +18,7 @@ def test_export_csv(mocker):
     csv_str = csv_bytes.decode("utf-8")
     lines = csv_str.strip().split("\r\n")
     assert len(lines) == 3
-    assert "id,source,title" in lines[0]
+    assert "id,source,canonical_url,title,summary,published_at,fetched_at" in lines[0]
     assert "csv_title" in lines[1]
     assert 'title ""with"" quotes' in lines[2]
 

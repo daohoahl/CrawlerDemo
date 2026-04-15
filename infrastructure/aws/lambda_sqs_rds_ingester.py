@@ -12,7 +12,8 @@ def lambda_handler(event, context):
     Reads batches of ArticleIn payload and writes them to RDS PostgreSQL databases.
     Requires psycopg2-binary installed in the Lambda environment or as a Layer.
     """
-    import psycopg2
+    import pg8000
+    import ssl
 
     rds_host = os.environ.get('RDS_HOST')
     db_name = os.environ.get('DB_NAME')
@@ -23,12 +24,16 @@ def lambda_handler(event, context):
         logger.error("Missing Database credentials in environment variables.")
         raise ValueError("Missing database environment variables.")
 
-    conn = psycopg2.connect(
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
+
+    conn = pg8000.connect(
         host=rds_host, 
         database=db_name,
         user=db_user, 
         password=db_pass,
-        sslmode='require' # Secure RDS connection
+        ssl_context=ssl_ctx
     )
     
     total_processed = 0

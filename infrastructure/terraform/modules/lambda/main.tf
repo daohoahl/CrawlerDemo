@@ -99,7 +99,7 @@ resource "aws_lambda_function" "ingester" {
 resource "aws_lambda_event_source_mapping" "sqs" {
   event_source_arn                   = var.sqs_main_queue_arn
   function_name                      = aws_lambda_function.ingester.arn
-  batch_size                         = var.sqs_batch_size        # spec = 10
+  batch_size                         = var.sqs_batch_size # spec = 10
   maximum_batching_window_in_seconds = 30
   enabled                            = true
 

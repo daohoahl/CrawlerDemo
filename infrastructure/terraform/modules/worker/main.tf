@@ -83,14 +83,14 @@ data "aws_ami" "al2023" {
 
 locals {
   user_data = base64encode(templatefile("${path.module}/templates/user_data.sh.tpl", {
-    aws_region                   = var.aws_region
-    ecr_repo_url                 = aws_ecr_repository.worker.repository_url
-    log_group_name               = aws_cloudwatch_log_group.worker.name
-    sqs_queue_url                = var.sqs_queue_url
-    s3_raw_bucket                = var.s3_raw_bucket
-    interval_seconds             = var.interval_seconds
-    max_items_per_source         = var.max_items_per_source
-    claim_check_threshold_bytes  = var.claim_check_threshold_bytes
+    aws_region                  = var.aws_region
+    ecr_repo_url                = aws_ecr_repository.worker.repository_url
+    log_group_name              = aws_cloudwatch_log_group.worker.name
+    sqs_queue_url               = var.sqs_queue_url
+    s3_raw_bucket               = var.s3_raw_bucket
+    interval_seconds            = var.interval_seconds
+    max_items_per_source        = var.max_items_per_source
+    claim_check_threshold_bytes = var.claim_check_threshold_bytes
   }))
 }
 
@@ -151,8 +151,8 @@ resource "aws_launch_template" "worker" {
 resource "aws_autoscaling_group" "worker" {
   name                      = "${local.name_prefix}-worker-asg"
   vpc_zone_identifier       = var.private_subnet_ids # Spec: Multi-AZ (>=2 subnets)
-  min_size                  = var.min_size          # Spec: 1
-  max_size                  = var.max_size          # Spec: 2
+  min_size                  = var.min_size           # Spec: 1
+  max_size                  = var.max_size           # Spec: 2
   desired_capacity          = var.desired_capacity   # Spec: 1
   health_check_type         = "EC2"
   health_check_grace_period = 300
@@ -208,9 +208,9 @@ resource "aws_autoscaling_policy" "scale_out" {
 resource "aws_cloudwatch_metric_alarm" "cpu_high" {
   alarm_name          = "${local.name_prefix}-worker-cpu-high"
   comparison_operator = "GreaterThanThreshold"
-  evaluation_periods  = 3          # 3 consecutive periods
-  period              = 60         # 60-second periods (=> 3 minutes total)
-  threshold           = 70         # spec
+  evaluation_periods  = 3  # 3 consecutive periods
+  period              = 60 # 60-second periods (=> 3 minutes total)
+  threshold           = 70 # spec
   metric_name         = "CPUUtilization"
   namespace           = "AWS/EC2"
   statistic           = "Average"
@@ -237,9 +237,9 @@ resource "aws_autoscaling_policy" "scale_in" {
 resource "aws_cloudwatch_metric_alarm" "cpu_low" {
   alarm_name          = "${local.name_prefix}-worker-cpu-low"
   comparison_operator = "LessThanThreshold"
-  evaluation_periods  = 3          # 3 consecutive periods
-  period              = 60         # 60-second periods (=> 3 minutes total)
-  threshold           = 40         # spec
+  evaluation_periods  = 3  # 3 consecutive periods
+  period              = 60 # 60-second periods (=> 3 minutes total)
+  threshold           = 40 # spec
   metric_name         = "CPUUtilization"
   namespace           = "AWS/EC2"
   statistic           = "Average"

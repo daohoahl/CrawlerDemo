@@ -82,7 +82,7 @@ resource "aws_db_instance" "main" {
 
   deletion_protection        = var.db_deletion_protection
   skip_final_snapshot        = true
-  apply_immediately           = false
+  apply_immediately          = false
   auto_minor_version_upgrade = true
 
   performance_insights_enabled    = true

@@ -137,11 +137,11 @@ module "storage" {
 
   kms_key_arn = module.security.kms_key_arn
 
-  db_instance_class      = var.db_instance_class
+  db_instance_class        = var.db_instance_class
   db_backup_retention_days = var.db_backup_retention_days
-  db_multi_az            = false # spec: Single-AZ for Scope 1
-  db_deletion_protection = false
-  db_password            = var.db_password
+  db_multi_az              = false # spec: Single-AZ for Scope 1
+  db_deletion_protection   = false
+  db_password              = var.db_password
 
   common_tags = local.common_tags
   depends_on  = [module.networking, module.security]
@@ -169,12 +169,12 @@ module "lambda" {
   db_username  = module.storage.db_username
   db_password  = var.db_password
 
-  lambda_memory_mb                   = 256
-  lambda_timeout_seconds             = 180
-  lambda_reserved_concurrency        = var.lambda_reserved_concurrency
+  lambda_memory_mb                    = 256
+  lambda_timeout_seconds              = 180
+  lambda_reserved_concurrency         = var.lambda_reserved_concurrency
   lambda_event_source_max_concurrency = var.lambda_event_source_max_concurrency
-  sqs_batch_size                     = 10 # spec
-  log_retention_days                 = 30
+  sqs_batch_size                      = 10 # spec
+  log_retention_days                  = 30
 
   lambda_source_file = local.lambda_source_file
   lambda_layer_zip   = local.lambda_layer_zip

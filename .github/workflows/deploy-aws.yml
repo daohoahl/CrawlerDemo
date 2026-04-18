@@ -114,24 +114,66 @@ jobs:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsRole
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Start instance refresh
+      - name: Rolling refresh ASG (wait for any in-flight refresh, then start)
         run: |
-          aws autoscaling start-instance-refresh \
-            --auto-scaling-group-name "${{ env.ASG_NAME }}" \
-            --strategy Rolling \
-            --preferences '{"MinHealthyPercentage":50,"InstanceWarmup":120}'
+          set -euo pipefail
+          ASG="${{ env.ASG_NAME }}"
 
-      - name: Wait for refresh to complete
-        run: |
-          for i in $(seq 1 30); do
+          wait_idle() {
+            # Block until no Instance Refresh is Pending/InProgress (manual deploy or overlapping run).
+            for i in $(seq 1 120); do
+              R=$(aws autoscaling describe-instance-refreshes \
+                --auto-scaling-group-name "$ASG" \
+                --max-records 1 \
+                --query 'InstanceRefreshes[0].Status' \
+                --output text 2>/dev/null || true)
+              R=$(echo "$R" | head -n1 | tr -d '\r')
+              case "$R" in
+                Pending|InProgress)
+                  echo "[$i/120] Another instance refresh is active: $R — waiting..."
+                  sleep 30
+                  ;;
+                *)
+                  echo "OK to start a new refresh (latest status=$R)"
+                  return 0
+                  ;;
+              esac
+            done
+            echo "Timeout waiting for existing instance refresh to finish" >&2
+            return 1
+          }
+
+          wait_idle
+          out=$(aws autoscaling start-instance-refresh \
+            --auto-scaling-group-name "$ASG" \
+            --strategy Rolling \
+            --preferences '{"MinHealthyPercentage":50,"InstanceWarmup":120}' 2>&1) && rc=0 || rc=$?
+          printf '%s\n' "$out"
+          if [ "$rc" -ne 0 ]; then
+            if echo "$out" | grep -q InstanceRefreshInProgress; then
+              echo "InstanceRefreshInProgress — waiting, then retrying once..."
+              wait_idle
+              aws autoscaling start-instance-refresh \
+                --auto-scaling-group-name "$ASG" \
+                --strategy Rolling \
+                --preferences '{"MinHealthyPercentage":50,"InstanceWarmup":120}'
+            else
+              exit "$rc"
+            fi
+          fi
+
+          for i in $(seq 1 45); do
             STATUS=$(aws autoscaling describe-instance-refreshes \
-              --auto-scaling-group-name "${{ env.ASG_NAME }}" \
-              --query 'InstanceRefreshes[0].Status' --output text)
-            echo "[$i/30] status=$STATUS"
+              --auto-scaling-group-name "$ASG" \
+              --max-records 1 \
+              --query 'InstanceRefreshes[0].Status' \
+              --output text | head -n1 | tr -d '\r')
+            echo "[$i/45] refresh status=$STATUS"
             case "$STATUS" in
               Successful) exit 0 ;;
               Failed|Cancelled) exit 1 ;;
             esac
             sleep 30
           done
+          echo "Timeout waiting for instance refresh" >&2
           exit 1

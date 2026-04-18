@@ -1,0 +1,23 @@
+# Terraform state files (use S3 remote backend instead)
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Exclude sensitive variable files
+*.tfvars
+!*.tfvars.example
+
+# Terraform provider plugins (downloaded automatically)
+.terraform/
+.terraform.lock.hcl
+
+# Lambda build artifacts
+**/build/
+**/lambda_function.zip
+
+# macOS
+.DS_Store

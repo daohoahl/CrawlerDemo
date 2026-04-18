@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 import httpx
 from crawlerdemo.sources.rss import crawl_rss
 from crawlerdemo.sources.sitemap import crawl_sitemap
-from crawlerdemo.db import ArticleIn
+from crawlerdemo.models import ArticleIn
 
 def test_crawl_rss(mocker):
     # Mock httpx.Client

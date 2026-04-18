@@ -1,3 +1,6 @@
+"""
+sources.rss — Parse an RSS / Atom feed into ArticleIn records.
+"""
 from __future__ import annotations
 
 import datetime as dt
@@ -7,7 +10,7 @@ import feedparser
 import httpx
 from dateutil import parser as date_parser
 
-from crawlerdemo.db import ArticleIn
+from crawlerdemo.models import ArticleIn
 from crawlerdemo.normalize import canonicalize_url
 
 
@@ -23,7 +26,12 @@ def _parse_datetime(value: str | None) -> dt.datetime | None:
         return None
 
 
-def crawl_rss(client: httpx.Client, source_name: str, rss_url: str, limit: int) -> Iterable[ArticleIn]:
+def crawl_rss(
+    client: httpx.Client,
+    source_name: str,
+    rss_url: str,
+    limit: int,
+) -> Iterable[ArticleIn]:
     resp = client.get(rss_url)
     resp.raise_for_status()
     parsed = feedparser.parse(resp.content)
@@ -38,7 +46,9 @@ def crawl_rss(client: httpx.Client, source_name: str, rss_url: str, limit: int) 
 
         title = getattr(entry, "title", None)
         summary = getattr(entry, "summary", None) or getattr(entry, "description", None)
-        published = _parse_datetime(getattr(entry, "published", None) or getattr(entry, "updated", None))
+        published = _parse_datetime(
+            getattr(entry, "published", None) or getattr(entry, "updated", None)
+        )
 
         yield ArticleIn(
             source=source_name,
@@ -48,4 +58,3 @@ def crawl_rss(client: httpx.Client, source_name: str, rss_url: str, limit: int) 
             published_at=published,
         )
         count += 1
-

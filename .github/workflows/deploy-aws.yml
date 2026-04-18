@@ -3,11 +3,14 @@ name: Build and Deploy Crawler to AWS
 on:
   push:
     branches: ["main"]
+  workflow_dispatch: {}
 
 env:
   AWS_REGION: ap-southeast-1
-  ECR_REPOSITORY: crawler-demo
-  ASG_NAME: crawler-asg
+  ECR_REPOSITORY: crawler-demo-worker
+  ASG_NAME: crawler-demo-worker-asg
+  LAMBDA_FUNCTION_NAME: crawler-demo-ingester
+  LAMBDA_SOURCE_FILE: infrastructure/aws/lambda_ingester/lambda_function.py
 
 permissions:
   id-token: write
@@ -15,87 +18,120 @@ permissions:
 
 jobs:
   test:
+    name: Lint and test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
+          python-version: "3.11"
+          cache: pip
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r requirements-test.txt
+          pip install -r requirements.txt -r requirements-test.txt
 
-      - name: Run Pytest
-        env:
-          CRAWLER_DATABASE_URL: sqlite:///./test.db
+      - name: Pytest
+        run: PYTHONPATH=src pytest -q
+
+  terraform-validate:
+    name: Terraform fmt + validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - name: fmt
+        run: terraform fmt -check -recursive infrastructure/terraform
+      - name: validate
         run: |
-          PYTHONPATH=src pytest tests/
+          terraform -chdir=infrastructure/terraform/environments/demo init -backend=false
+          terraform -chdir=infrastructure/terraform/environments/demo validate
 
   build-and-push:
-    needs: test
+    name: Build and push worker image
+    needs: [test, terraform-validate]
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.build.outputs.image }}
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::478111025341:role/GitHubActionsRole
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Login to ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build and push to ECR
-        id: build
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        run: |
-          IMAGE="$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
-          docker build -t $IMAGE .
-          docker push $IMAGE
-          docker tag $IMAGE $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest
-          docker push $ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest
-          echo "image=$IMAGE" >> $GITHUB_OUTPUT
-
-  deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsRole
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Trigger Rolling Deploy
+      - name: Login ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        id: build
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          IMAGE="$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+          docker build --platform linux/amd64 -t "$IMAGE" .
+          docker push "$IMAGE"
+          docker tag "$IMAGE" "$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest"
+          docker push "$ECR_REGISTRY/${{ env.ECR_REPOSITORY }}:latest"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+  deploy-lambda:
+    name: Package and update Lambda
+    needs: terraform-validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsRole
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Zip and update function code
+        run: |
+          cd infrastructure/aws/lambda_ingester
+          zip -q lambda_function.zip lambda_function.py
+          aws lambda update-function-code \
+            --function-name "${{ env.LAMBDA_FUNCTION_NAME }}" \
+            --zip-file fileb://lambda_function.zip \
+            --publish
+
+  deploy-worker:
+    name: Rolling refresh worker ASG
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Start instance refresh
         run: |
           aws autoscaling start-instance-refresh \
-            --auto-scaling-group-name ${{ env.ASG_NAME }} \
+            --auto-scaling-group-name "${{ env.ASG_NAME }}" \
             --strategy Rolling \
-            --preferences '{"MinHealthyPercentage": 50, "InstanceWarmup": 300}'
+            --preferences '{"MinHealthyPercentage":50,"InstanceWarmup":120}'
 
-      - name: Wait for deploy to complete
+      - name: Wait for refresh to complete
         run: |
-          for i in $(seq 1 20); do
+          for i in $(seq 1 30); do
             STATUS=$(aws autoscaling describe-instance-refreshes \
-              --auto-scaling-group-name ${{ env.ASG_NAME }} \
+              --auto-scaling-group-name "${{ env.ASG_NAME }}" \
               --query 'InstanceRefreshes[0].Status' --output text)
-            echo "[$i/20] Status: $STATUS"
-            [ "$STATUS" = "Successful" ] && exit 0
-            [ "$STATUS" = "Failed" ] && exit 1
+            echo "[$i/30] status=$STATUS"
+            case "$STATUS" in
+              Successful) exit 0 ;;
+              Failed|Cancelled) exit 1 ;;
+            esac
             sleep 30
           done
           exit 1

@@ -1,10 +1,12 @@
 [project]
 name = "crawlerdemo"
-version = "0.1.0"
-description = "Simple crawler system (RSS + sitemap) with Docker/EC2/GitHub Actions deployment."
+version = "1.0.0"
+description = "Production-ready AWS web crawler (EC2 ASG → SQS → Lambda → RDS + S3)."
 requires-python = ">=3.11"
-dependencies = []
 
 [tool.ruff]
 line-length = 100
 
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,83 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+.container {
+  max-width: 1100px;
+  margin: 24px auto;
+  padding: 0 16px;
+}
+.header h1 {
+  margin: 0 0 8px;
+}
+.header p {
+  margin: 0 0 16px;
+  color: #94a3b8;
+}
+.card {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 16px;
+}
+.row {
+  display: grid;
+  grid-template-columns: 2fr 1fr auto auto auto;
+  gap: 10px;
+}
+input,
+select,
+button {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0b1220;
+  color: #e2e8f0;
+}
+button {
+  background: #2563eb;
+  border: none;
+  cursor: pointer;
+}
+.meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.pager {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.results {
+  display: grid;
+  gap: 10px;
+}
+.item {
+  border: 1px solid #243244;
+  border-radius: 10px;
+  padding: 10px;
+}
+.item h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+.item .meta-line {
+  color: #93c5fd;
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.item p {
+  margin: 0 0 8px;
+  color: #cbd5e1;
+}
+.item a {
+  color: #60a5fa;
+}

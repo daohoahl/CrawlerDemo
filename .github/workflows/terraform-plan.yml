@@ -1,0 +1,40 @@
+name: Terraform Plan (PR)
+
+on:
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "infrastructure/terraform/**"
+      - ".github/workflows/terraform-plan.yml"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+env:
+  AWS_REGION: ap-southeast-1
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: Configure AWS credentials (OIDC, read-only for plan)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/GitHubActionsRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Init + plan
+        env:
+          TF_VAR_db_password: ${{ secrets.TF_VAR_DB_PASSWORD }}
+        run: |
+          terraform -chdir=infrastructure/terraform/environments/demo init
+          terraform -chdir=infrastructure/terraform/environments/demo fmt -check -recursive
+          terraform -chdir=infrastructure/terraform/environments/demo validate
+          terraform -chdir=infrastructure/terraform/environments/demo plan -no-color -out=tfplan

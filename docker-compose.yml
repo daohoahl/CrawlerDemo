@@ -1,23 +1,18 @@
+# =============================================================================
+# Local development compose — runs one worker cycle against real AWS
+# (credentials are mounted from your ~/.aws config).
+# =============================================================================
 services:
-  crawler:
+  worker:
     build: .
-    image: crawlerdemo:local
+    image: crawler-worker:local
     environment:
-      CRAWLER_DATABASE_URL: "sqlite:///./data/crawler.db"
-      CRAWLER_SCHEDULE_MODE: "interval"
-      CRAWLER_INTERVAL_SECONDS: "1800"
-      CRAWLER_MAX_ITEMS_PER_SOURCE: "100"
+      CRAWLER_SCHEDULE_MODE: "once"
+      CRAWLER_AWS_REGION: "${AWS_REGION:-ap-southeast-1}"
+      CRAWLER_SQS_QUEUE_URL: "${CRAWLER_SQS_QUEUE_URL:-}"
+      CRAWLER_S3_RAW_BUCKET: "${CRAWLER_S3_RAW_BUCKET:-}"
+      CRAWLER_MAX_ITEMS_PER_SOURCE: "20"
+      CRAWLER_LOG_LEVEL: "INFO"
+      AWS_PROFILE: "${AWS_PROFILE:-default}"
     volumes:
-      - ./data:/app/data
-
-  web:
-    build: .
-    image: crawlerdemo:local
-    command: ["uvicorn", "crawlerdemo.web:app", "--host", "0.0.0.0", "--port", "8000"]
-    environment:
-      CRAWLER_DATABASE_URL: "sqlite:///./data/crawler.db"
-    volumes:
-      - ./data:/app/data
-    ports:
-      - "8000:8000"
-
+      - ~/.aws:/app/.aws:ro

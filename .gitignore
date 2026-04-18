@@ -21,4 +21,13 @@ data/
 .idea/
 .vscode/
 
-venv-test/
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+*.tfvars
+!*.tfvars.example
+**/build/
+**/lambda_function.zip

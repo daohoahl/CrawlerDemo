@@ -62,7 +62,8 @@ def test_crawl_sitemap_urlset(mocker):
     assert articles[0].canonical_url == "https://example.com/sitemap-article"
     assert articles[0].published_at == dt.datetime(2026, 4, 14, 10, 0, tzinfo=dt.timezone.utc)
     assert articles[0].source == "sitemap:test"
-    assert articles[0].title is None
+    # Last URL path segment → readable title when sitemap has no <title>
+    assert articles[0].title == "sitemap article"
 
 
 def test_crawl_sitemap_sitemapindex(mocker):
@@ -95,4 +96,5 @@ def test_crawl_sitemap_sitemapindex(mocker):
 
     assert len(articles) == 1
     assert articles[0].canonical_url == "https://example.com/child-article"
+    assert articles[0].title == "child article"
 

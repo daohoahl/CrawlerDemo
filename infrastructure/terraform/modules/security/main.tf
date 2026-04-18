@@ -120,7 +120,10 @@ resource "aws_security_group" "lambda" {
   tags = merge(local.tags, { Name = "${local.name_prefix}-sg-lambda" })
 }
 
-# ── RDS: accept 5432 from Lambda only ───────────────────────────────────────
+# ── RDS: 5432 from Lambda + worker (ingress updated in-place; do not change
+# `description` casually — aws_security_group description change forces replace,
+# and a second SG with the same `name` fails with InvalidGroup.Duplicate while RDS
+# still holds the old SG.)
 resource "aws_security_group" "rds" {
   name        = "${local.name_prefix}-sg-rds"
   description = "RDS PostgreSQL - accepts 5432 from Lambda only"
@@ -134,6 +137,14 @@ resource "aws_security_group" "rds" {
     security_groups = [aws_security_group.lambda.id]
   }
 
+  ingress {
+    description     = "PostgreSQL from Worker"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.worker.id]
+  }
+
   egress {
     description = "Allow all outbound"
     from_port   = 0
@@ -142,7 +153,10 @@ resource "aws_security_group" "rds" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = merge(local.tags, { Name = "${local.name_prefix}-sg-rds" })
+  tags = merge(local.tags, {
+    Name   = "${local.name_prefix}-sg-rds"
+    Remark = "Ingress includes Lambda and worker; avoid changing SG description in TF"
+  })
 }
 
 # ═════════════════════════════════════════════════════════════════════════════

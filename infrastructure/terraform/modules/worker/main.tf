@@ -91,6 +91,12 @@ locals {
     interval_seconds            = var.interval_seconds
     max_items_per_source        = var.max_items_per_source
     claim_check_threshold_bytes = var.claim_check_threshold_bytes
+    web_db_host                 = var.web_db_host
+    web_db_port                 = var.web_db_port
+    web_db_name                 = var.web_db_name
+    web_db_user                 = var.web_db_user
+    web_db_password             = var.web_db_password
+    web_port                    = var.web_port
   }))
 }
 

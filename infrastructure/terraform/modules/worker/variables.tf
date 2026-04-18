@@ -94,6 +94,39 @@ variable "log_retention_days" {
   default     = 30
 }
 
+variable "web_db_host" {
+  description = "RDS host used by FastAPI dashboard container"
+  type        = string
+}
+
+variable "web_db_port" {
+  description = "RDS port used by FastAPI dashboard container"
+  type        = number
+  default     = 5432
+}
+
+variable "web_db_name" {
+  description = "Database name for FastAPI dashboard"
+  type        = string
+}
+
+variable "web_db_user" {
+  description = "Database username for FastAPI dashboard"
+  type        = string
+}
+
+variable "web_db_password" {
+  description = "Database password for FastAPI dashboard"
+  type        = string
+  sensitive   = true
+}
+
+variable "web_port" {
+  description = "Container and host port exposed by FastAPI dashboard"
+  type        = number
+  default     = 8080
+}
+
 variable "common_tags" {
   description = "Common tags"
   type        = map(string)

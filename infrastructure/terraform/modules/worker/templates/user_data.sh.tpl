@@ -110,8 +110,53 @@ sed -i \
 systemctl daemon-reload
 systemctl enable --now crawler-worker.service
 
+# ── 5. systemd unit: FastAPI dashboard on port __WEB_PORT__ ──────────────────
+cat > /etc/systemd/system/crawler-web.service <<'EOF_WEB'
+[Unit]
+Description=Crawler Web Dashboard (Docker)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=0
+
+ExecStartPre=-/usr/bin/docker rm -f crawler-web
+ExecStart=/usr/bin/docker run --rm --name crawler-web \
+  --log-driver=json-file \
+  --log-opt max-size=10m --log-opt max-file=3 \
+  -p __WEB_PORT__:__WEB_PORT__ \
+  -e WEB_DB_HOST=__WEB_DB_HOST__ \
+  -e WEB_DB_PORT=__WEB_DB_PORT__ \
+  -e WEB_DB_NAME=__WEB_DB_NAME__ \
+  -e WEB_DB_USER=__WEB_DB_USER__ \
+  -e WEB_DB_PASSWORD=__WEB_DB_PASSWORD__ \
+  __IMAGE__ \
+  uvicorn crawlerdemo.webapp:app --host 0.0.0.0 --port __WEB_PORT__ --app-dir src
+
+ExecStop=/usr/bin/docker stop crawler-web
+
+[Install]
+WantedBy=multi-user.target
+EOF_WEB
+
+sed -i \
+  -e "s#__WEB_PORT__#${web_port}#g" \
+  -e "s#__WEB_DB_HOST__#${web_db_host}#g" \
+  -e "s#__WEB_DB_PORT__#${web_db_port}#g" \
+  -e "s#__WEB_DB_NAME__#${web_db_name}#g" \
+  -e "s#__WEB_DB_USER__#${web_db_user}#g" \
+  -e "s#__WEB_DB_PASSWORD__#${web_db_password}#g" \
+  -e "s#__IMAGE__#$REPO_URL:$IMAGE_TAG#g" \
+  /etc/systemd/system/crawler-web.service
+
+systemctl daemon-reload
+systemctl enable --now crawler-web.service
+
 # Stream container stdout/stderr into /var/log/crawler.log so CloudWatch
 # Agent ships it without needing the Docker log driver plugin.
 nohup bash -c 'while true; do docker logs -f crawler-worker >> /var/log/crawler.log 2>&1 || true; sleep 5; done' &
+nohup bash -c 'while true; do docker logs -f crawler-web >> /var/log/crawler.log 2>&1 || true; sleep 5; done' &
 
 echo "[user-data] $(date -Is) bootstrap complete"

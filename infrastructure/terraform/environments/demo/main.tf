@@ -208,6 +208,12 @@ module "worker" {
   interval_seconds            = var.crawler_interval_seconds
   max_items_per_source        = 100
   claim_check_threshold_bytes = 204800 # 200 KB
+  web_db_host                 = module.storage.rds_endpoint
+  web_db_port                 = module.storage.rds_port
+  web_db_name                 = module.storage.db_name
+  web_db_user                 = module.storage.db_username
+  web_db_password             = var.db_password
+  web_port                    = var.web_port
 
   log_retention_days = 30
   common_tags        = local.common_tags
@@ -216,7 +222,92 @@ module "worker" {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 7. Observability — SNS + alarms + dashboard
+# 7. Public Web ALB -> worker ASG (FastAPI dashboard)
+# ═════════════════════════════════════════════════════════════════════════════
+
+resource "aws_security_group" "web_alb" {
+  name        = "${local.name_prefix}-sg-web-alb"
+  description = "Public ALB for crawler web dashboard"
+  vpc_id      = module.networking.vpc_id
+
+  ingress {
+    description = "Allow HTTP from internet"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "Allow all outbound"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, { Name = "${local.name_prefix}-sg-web-alb" })
+}
+
+resource "aws_security_group_rule" "worker_web_from_alb" {
+  type                     = "ingress"
+  description              = "Allow web traffic from ALB to worker web container"
+  from_port                = var.web_port
+  to_port                  = var.web_port
+  protocol                 = "tcp"
+  security_group_id        = module.security.sg_worker_id
+  source_security_group_id = aws_security_group.web_alb.id
+}
+
+resource "aws_lb" "web" {
+  name               = "${local.name_prefix}-web-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.web_alb.id]
+  subnets            = module.networking.public_subnet_ids
+
+  tags = merge(local.common_tags, { Name = "${local.name_prefix}-web-alb" })
+}
+
+resource "aws_lb_target_group" "web" {
+  name        = "${local.name_prefix}-web-tg"
+  port        = var.web_port
+  protocol    = "HTTP"
+  target_type = "instance"
+  vpc_id      = module.networking.vpc_id
+
+  health_check {
+    enabled             = true
+    path                = "/health"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
+  }
+
+  tags = merge(local.common_tags, { Name = "${local.name_prefix}-web-tg" })
+}
+
+resource "aws_lb_listener" "web_http" {
+  load_balancer_arn = aws_lb.web.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.web.arn
+  }
+}
+
+resource "aws_autoscaling_attachment" "web_tg" {
+  autoscaling_group_name = module.worker.asg_name
+  lb_target_group_arn    = aws_lb_target_group.web.arn
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 8. Observability — SNS + alarms + dashboard
 # ═════════════════════════════════════════════════════════════════════════════
 
 module "observability" {

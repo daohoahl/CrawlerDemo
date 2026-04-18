@@ -69,6 +69,12 @@ variable "crawler_interval_seconds" {
   default     = 1800
 }
 
+variable "web_port" {
+  description = "Port exposed by the FastAPI dashboard container on worker instances"
+  type        = number
+  default     = 8080
+}
+
 variable "lambda_reserved_concurrency" {
   description = "Reserved concurrency for Lambda ingester (null = no reserved cap)"
   type        = number

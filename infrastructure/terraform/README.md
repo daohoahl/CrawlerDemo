@@ -3,6 +3,8 @@
 Production-Ready **Scope 1** deployment:
 
 ```
+Internet ──► ALB (HTTP) ──► FastAPI dashboard on worker ASG (port 8080)
+                                  │
 EC2 ASG Worker (Multi-AZ, t3.micro) ──► SQS Standard ──► Lambda Ingester ──► RDS PostgreSQL
                                          (VT=1080s,      (max ESM=5,        (db.t3.micro,
                                           DLQ×3)          BatchSize=10)      Single-AZ)
@@ -65,14 +67,17 @@ aws ecr get-login-password --region ap-southeast-1 | docker login --username AWS
 docker build --platform linux/amd64 -t "$ECR:latest" ../..
 docker push "$ECR:latest"
 
-# 5. Apply the DB schema ONCE (creates the articles table + UNIQUE INDEX)
-#    (from a bastion / Session Manager tunnel to RDS)
-psql "host=$(terraform -chdir=environments/demo output -raw rds_endpoint) \
-      dbname=crawlerdb user=crawler" -f ../aws/lambda_ingester/schema.sql
+# 5. Init DB schema via Lambda (cloud-native, no local psql/SSM tunnel)
+aws lambda invoke --function-name crawler-demo-ingester \
+  --payload '{"action":"init-schema"}' --cli-binary-format raw-in-base64-out /tmp/out.json
+cat /tmp/out.json
 
 # 6. Refresh ASG instances so they pull the latest worker image
 aws autoscaling start-instance-refresh \
   --auto-scaling-group-name "$(terraform -chdir=environments/demo output -raw worker_asg_name)"
+
+# 7. Get public web URL
+terraform -chdir=environments/demo output -raw web_dashboard_url
 ```
 
 ## Backend note

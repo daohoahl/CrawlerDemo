@@ -68,3 +68,8 @@ output "db_secret_arn" {
   description = "Secrets Manager secret ARN with DB credentials"
   value       = module.security.db_secret_arn
 }
+
+output "web_dashboard_url" {
+  description = "Public URL of FastAPI dashboard through ALB"
+  value       = "http://${aws_lb.web.dns_name}"
+}

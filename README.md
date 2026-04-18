@@ -1,11 +1,13 @@
 # Crawler — AWS Deployment (Terraform + CI/CD)
 
-Hai bước duy nhất để đưa hệ thống lên AWS:
+Hai bước duy nhất để đưa hệ thống + web lên AWS:
 
-1. **Terraform** — dựng toàn bộ hạ tầng (VPC, SQS, RDS, Lambda, ECR, ASG, CloudWatch).
+1. **Terraform** — dựng toàn bộ hạ tầng (VPC, SQS, RDS, Lambda, ECR, ASG, CloudWatch, ALB public cho web).
 2. **GitHub Actions** — mỗi lần push `main` là tự build image, update Lambda, rolling refresh ASG.
 
 ```
+Internet ─► ALB (HTTP:80) ─► FastAPI Web (port 8080 on worker ASG)
+                                  │
 EC2 ASG Worker (Multi-AZ, t3.micro) ─► SQS Standard ─► Lambda Ingester ─► RDS PostgreSQL
          │                              (VT 1080s,      (BatchSize=10,     (db.t3.micro,
          └── Claim-Check gzip ──► S3     DLQ×3)          max ESM=5)         Single-AZ)
@@ -40,6 +42,9 @@ export TF_VAR_db_password="your-strong-password"
 # 1.3 Apply
 terraform -chdir=infrastructure/terraform/environments/demo init
 terraform -chdir=infrastructure/terraform/environments/demo apply
+
+# Web URL (ALB public)
+terraform -chdir=infrastructure/terraform/environments/demo output -raw web_dashboard_url
 ```
 
 Schema DB tự tạo ở cold-start của Lambda (DDL idempotent đã nhúng trong `lambda_function.py`) — **không cần `psql`, không cần SSM tunnel**. Muốn chạy ngay không chờ message đầu tiên:
@@ -83,7 +88,7 @@ Xong. `git push` lên `main` là pipeline deploy chạy.
 | `FreeTierRestrictionError` RDS backup            | `db_backup_retention_days = 1` (default rồi)     |
 | `Cannot find version 15.8 for postgres`          | Để `engine_version = "15"` (đã fix)              |
 | `ReservedConcurrentExecutions ... minimum 10`    | `lambda_reserved_concurrency = null` (đã fix)    |
-| Worker không pull image mới                      | CI tự `start-instance-refresh`; manual: `aws autoscaling start-instance-refresh --auto-scaling-group-name crawler-demo-worker-asg` |
+| Worker/Web không pull image mới                 | CI tự `start-instance-refresh`; manual: `aws autoscaling start-instance-refresh --auto-scaling-group-name crawler-demo-worker-asg` |
 
 ---
 
@@ -93,7 +98,7 @@ Xong. `git push` lên `main` là pipeline deploy chạy.
 terraform -chdir=infrastructure/terraform/environments/demo output
 # rds_endpoint, sqs_queue_url, sqs_dlq_url,
 # ecr_repository_url, worker_asg_name, lambda_function_name,
-# cloudwatch_dashboard_url, sns_alert_topic_arn
+# cloudwatch_dashboard_url, sns_alert_topic_arn, web_dashboard_url
 ```
 
 Xem chi tiết kiến trúc: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · Giải thích service + Terraform: [`docs/SERVICES_AND_TERRAFORM.md`](docs/SERVICES_AND_TERRAFORM.md).

@@ -30,7 +30,7 @@ class WebSettings:
             )
         return (
             f"host={self.db_host} port={self.db_port} dbname={self.db_name} "
-            f"user={self.db_user} password={self.db_password}"
+            f"user={self.db_user} password={self.db_password} sslmode=require"
         )
 
 
@@ -62,14 +62,24 @@ def _where_clause(q: str | None, source: str | None) -> tuple[str, dict[str, obj
 
 @app.get("/health")
 def health() -> dict[str, str]:
+    """
+    Liveness for ALB/ASG: must stay HTTP 200 without touching RDS.
+    RDS-dependent checks live under /health/ready.
+    """
+    return {"status": "ok"}
+
+
+@app.get("/health/ready")
+def health_ready() -> dict[str, str]:
+    """Returns 200 only when the app can reach PostgreSQL."""
     try:
-        with psycopg.connect(settings.dsn, connect_timeout=5) as conn:
+        with psycopg.connect(settings.dsn) as conn:
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
                 _ = cur.fetchone()
         return {"status": "ok"}
     except Exception as exc:  # pragma: no cover
-        raise HTTPException(status_code=500, detail=f"DB check failed: {exc}") from exc
+        raise HTTPException(status_code=503, detail=f"DB check failed: {exc}") from exc
 
 
 @app.get("/api/articles")

@@ -37,7 +37,7 @@ aws s3api put-bucket-versioning \
 # 1.2 Biến bí mật
 cp infrastructure/terraform/environments/demo/terraform.tfvars.example \
    infrastructure/terraform/environments/demo/terraform.tfvars
-export TF_VAR_db_password="your-strong-password"
+export TF_VAR_db_password="12345678"
 
 # 1.3 Apply
 terraform -chdir=infrastructure/terraform/environments/demo init
@@ -101,4 +101,4 @@ terraform -chdir=infrastructure/terraform/environments/demo output
 # cloudwatch_dashboard_url, sns_alert_topic_arn, web_dashboard_url
 ```
 
-Xem chi tiết kiến trúc: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · Giải thích service + Terraform: [`docs/SERVICES_AND_TERRAFORM.md`](docs/SERVICES_AND_TERRAFORM.md).
+Xem chi tiết kiến trúc: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · Giải thích service + Terraform: [`docs/SERVICES_AND_TERRAFORM.md`](docs/SERVICES_AND_TERRAFORM.md) · **Bản đồ SA + Terraform (một file):** [`docs/ARCHITECTURE_SOLUTION_TERRAFORM_MAP.md`](docs/ARCHITECTURE_SOLUTION_TERRAFORM_MAP.md).

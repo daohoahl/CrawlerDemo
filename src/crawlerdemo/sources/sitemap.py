@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import datetime as dt
 from typing import Iterable
+from urllib.parse import unquote, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -13,6 +14,15 @@ from dateutil import parser as date_parser
 
 from crawlerdemo.models import ArticleIn
 from crawlerdemo.normalize import canonicalize_url
+
+
+def _title_from_url(url: str) -> str:
+    """Sitemap URLs often have no title; use last path segment as a readable label."""
+    path = urlparse(url).path.strip("/")
+    if not path:
+        return urlparse(url).netloc or "Article"
+    last = path.split("/")[-1]
+    return unquote(last).replace("-", " ").replace("_", " ")[:200] or "Article"
 
 
 def _parse_datetime(value: str | None) -> dt.datetime | None:
@@ -67,10 +77,12 @@ def crawl_sitemap(
             continue
         lastmod_tag = u.find("lastmod")
         lastmod = _parse_datetime(lastmod_tag.text if lastmod_tag else None)
+        can = canonicalize_url(loc)
+        title_guess = _title_from_url(can)
         yield ArticleIn(
             source=source_name,
-            canonical_url=canonicalize_url(loc),
-            title=None,
+            canonical_url=can,
+            title=title_guess,
             summary=None,
             published_at=lastmod,
         )

@@ -1,46 +1,135 @@
 <!doctype html>
-<html lang="en">
+<html lang="vi">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Crawler Dashboard</title>
+    <meta name="description" content="Crawler — browse and search ingested articles." />
+    <title>Crawler · Operations</title>
+    <link rel="preconnect" href="https://fonts.bunny.net" crossorigin />
+    <link
+      href="https://fonts.bunny.net/css?family=dm-sans:400,500,600,700|jetbrains-mono:400,500"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/static/dashboard.css" />
   </head>
   <body>
-    <main class="container">
-      <header class="header">
-        <h1>Crawler Dashboard</h1>
-        <p>Search and browse ingested articles from RDS.</p>
-      </header>
-
-      <section class="card controls">
-        <div class="row">
-          <input id="q" type="text" placeholder="Search title, summary, URL..." />
-          <input id="source" type="text" placeholder="Filter source (exact)" />
-          <select id="sortBy">
-            <option value="fetched_at">Sort: fetched_at</option>
-            <option value="published_at">Sort: published_at</option>
-          </select>
-          <select id="sortOrder">
-            <option value="desc">desc</option>
-            <option value="asc">asc</option>
-          </select>
-          <button id="searchBtn">Search</button>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="meta">
-          <span id="summary">Loading...</span>
-          <div class="pager">
-            <button id="prevBtn">&lt; Prev</button>
-            <span id="pageInfo">Page 1</span>
-            <button id="nextBtn">Next &gt;</button>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <div class="brand-title">Crawler Ops</div>
+            <div class="brand-sub">Ingest · Queue · Dashboard</div>
           </div>
         </div>
-        <div id="results" class="results"></div>
-      </section>
-    </main>
+        <nav class="nav">
+          <a class="nav-link active" href="/">Articles</a>
+          <a class="nav-link" href="/docs" target="_blank" rel="noopener">API docs</a>
+          <a class="nav-link" href="/health/ready" target="_blank" rel="noopener">DB readiness</a>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="status-line" id="statusLine">
+            <span class="dot dot-pulse" id="statusDot" aria-hidden="true"></span>
+            <span id="statusText">Checking…</span>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="page-head">
+          <div>
+            <h1>Article catalogue</h1>
+            <p class="lede">
+              Tìm kiếm theo tiêu đề / tóm tắt / URL, lọc theo nguồn, xuất JSON trang hiện tại, mở bài gốc. Tiêu đề được
+              suy ra tự động nếu crawler không có title (vd. sitemap).
+            </p>
+          </div>
+        </header>
+
+        <section class="kpi-grid" id="kpiRoot" aria-live="polite">
+          <div class="kpi skeleton" data-kpi="total">—</div>
+          <div class="kpi skeleton" data-kpi="24h">—</div>
+          <div class="kpi skeleton" data-kpi="last">—</div>
+          <div class="kpi kpi-wide skeleton" data-kpi="sources">—</div>
+        </section>
+
+        <section class="panel toolbar">
+          <div class="toolbar-row">
+            <label class="field grow">
+              <span class="field-label">Search</span>
+              <input id="q" type="search" placeholder="Title, summary, URL…" autocomplete="off" />
+            </label>
+            <label class="field">
+              <span class="field-label">Source</span>
+              <select id="source">
+                <option value="">All sources</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field-label">Sort</span>
+              <select id="sortBy">
+                <option value="fetched_at">Fetched</option>
+                <option value="published_at">Published</option>
+              </select>
+            </label>
+            <label class="field narrow">
+              <span class="field-label">Order</span>
+              <select id="sortOrder">
+                <option value="desc">Newest first</option>
+                <option value="asc">Oldest first</option>
+              </select>
+            </label>
+            <label class="field narrow">
+              <span class="field-label">Page size</span>
+              <select id="pageSize">
+                <option value="10">10</option>
+                <option value="20" selected>20</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+          </div>
+          <div class="toolbar-actions">
+            <button type="button" class="btn btn-primary" id="searchBtn">Apply filters</button>
+            <button type="button" class="btn btn-ghost" id="resetBtn" title="Clear search &amp; filters">Reset</button>
+            <button type="button" class="btn btn-ghost" id="exportBtn" title="Download current page as JSON">Export page JSON</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="bar">
+            <span id="summary" class="summary">Loading…</span>
+            <div class="pager">
+              <button type="button" class="btn btn-ghost" id="prevBtn" aria-label="Previous page">&larr; Prev</button>
+              <span id="pageInfo" class="page-info">Page 1</span>
+              <button type="button" class="btn btn-ghost" id="nextBtn" aria-label="Next page">Next &rarr;</button>
+            </div>
+          </div>
+
+          <div class="table-scroll">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th class="col-id">#</th>
+                  <th>Headline</th>
+                  <th class="col-source">Source</th>
+                  <th class="col-dt">Published</th>
+                  <th class="col-dt">Fetched</th>
+                  <th class="col-actions">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="tbody">
+                <tr>
+                  <td colspan="6" class="empty">Loading…</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <script src="/static/dashboard.js"></script>
   </body>
 </html>

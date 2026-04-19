@@ -1,0 +1,18 @@
+---
+- name: Cài Docker
+  ansible.builtin.raw: /usr/bin/dnf install -y docker
+  register: _dnf_docker
+  changed_when: true
+  failed_when: (_dnf_docker.rc | default(-1)) != 0
+
+- name: Bật và khởi động Docker
+  ansible.builtin.systemd:
+    name: docker
+    enabled: true
+    state: started
+
+- name: Thêm ec2-user vào nhóm docker
+  ansible.builtin.user:
+    name: ec2-user
+    groups: docker
+    append: true

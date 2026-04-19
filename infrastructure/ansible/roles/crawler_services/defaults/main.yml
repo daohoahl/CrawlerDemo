@@ -1,0 +1,3 @@
+---
+crawler_pull_retries: 5
+crawler_pull_retry_delay: 30

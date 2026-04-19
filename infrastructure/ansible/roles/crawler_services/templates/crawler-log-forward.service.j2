@@ -1,0 +1,13 @@
+[Unit]
+Description=Crawler — ship Docker logs to /var/log/crawler.log (CloudWatch)
+After=docker.service crawler-worker.service crawler-web.service
+Requires=docker.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/crawler-forward-docker-logs.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

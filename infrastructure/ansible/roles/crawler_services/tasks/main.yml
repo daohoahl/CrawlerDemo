@@ -1,0 +1,102 @@
+---
+- name: Kiểm tra biến bắt buộc (mật khẩu DB)
+  ansible.builtin.assert:
+    that:
+      - crawler_web_db_password is defined
+      - (crawler_web_db_password | string | length) > 0
+    fail_msg: >-
+      Đặt crawler_web_db_password trong inventory/group_vars/crawler_demo/vault.yml (ansible-vault)
+      hoặc truyền -e crawler_web_db_password=... (không log lên CI).
+
+- name: Xác định host registry ECR
+  ansible.builtin.set_fact:
+    crawler_ecr_registry: "{{ crawler_ecr_repo_url.split('/')[0] }}"
+
+- name: Đăng nhập Docker vào ECR
+  ansible.builtin.shell: |
+    set -euo pipefail
+    aws ecr get-login-password --region "{{ crawler_aws_region }}" \
+      | docker login --username AWS --password-stdin "{{ crawler_ecr_registry }}"
+  register: _ecr_login
+  changed_when: false
+  no_log: true
+
+- name: Kéo image worker từ ECR
+  ansible.builtin.command:
+    argv:
+      - docker
+      - pull
+      - "{{ crawler_ecr_repo_url }}:{{ crawler_image_tag }}"
+  register: _docker_pull
+  retries: "{{ crawler_pull_retries | int }}"
+  delay: "{{ crawler_pull_retry_delay | int }}"
+  until: _docker_pull.rc == 0
+  changed_when: >-
+    'Downloaded newer image' in (
+      (_docker_pull.stdout | default('')) + (_docker_pull.stderr | default(''))
+    )
+
+- name: File log ứng dụng (CloudWatch tail)
+  ansible.builtin.file:
+    path: /var/log/crawler.log
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+    modification_time: preserve
+    access_time: preserve
+
+- name: File môi trường web (mật khẩu không lộ trong systemd show)
+  ansible.builtin.template:
+    src: crawler-web.env.j2
+    dest: /etc/sysconfig/crawler-web
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+
+- name: Unit systemd — crawler-worker
+  ansible.builtin.template:
+    src: crawler-worker.service.j2
+    dest: /etc/systemd/system/crawler-worker.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Unit systemd — crawler-web
+  ansible.builtin.template:
+    src: crawler-web.service.j2
+    dest: /etc/systemd/system/crawler-web.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Script chuyển log Docker ra /var/log/crawler.log
+  ansible.builtin.copy:
+    src: crawler-forward-docker-logs.sh
+    dest: /usr/local/sbin/crawler-forward-docker-logs.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Unit systemd — chuyển log container
+  ansible.builtin.template:
+    src: crawler-log-forward.service.j2
+    dest: /etc/systemd/system/crawler-log-forward.service
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Tải lại daemon systemd (sau khi sửa unit)
+  ansible.builtin.command: systemctl daemon-reload
+  changed_when: false
+
+- name: Bật và khởi động các dịch vụ crawler
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: restarted
+  loop:
+    - crawler-worker.service
+    - crawler-web.service
+    - crawler-log-forward.service

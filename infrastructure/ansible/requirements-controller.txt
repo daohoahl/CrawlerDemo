@@ -1,0 +1,5 @@
+# Cài trong venv Python 3.11/3.12 trên máy điều khiển (không dùng Python 3.13+ / 3.14 với Ansible + SSM — dễ lỗi NoneType).
+#   python3.12 -m venv .venv && source .venv/bin/activate && pip install -r requirements-controller.txt
+ansible-core>=2.15.0,<2.19.0
+boto3>=1.34.0
+certifi>=2024.0.0

@@ -1,0 +1,28 @@
+[Unit]
+Description=Crawler Worker (Docker)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=0
+
+ExecStartPre=-/usr/bin/docker rm -f crawler-worker
+ExecStart=/usr/bin/docker run --rm --name crawler-worker \
+  --log-driver=json-file \
+  --log-opt max-size=10m --log-opt max-file=3 \
+  -e CRAWLER_SCHEDULE_MODE=interval \
+  -e CRAWLER_INTERVAL_SECONDS={{ crawler_interval_seconds }} \
+  -e CRAWLER_MAX_ITEMS_PER_SOURCE={{ crawler_max_items_per_source }} \
+  -e CRAWLER_AWS_REGION={{ crawler_aws_region }} \
+  -e CRAWLER_SQS_QUEUE_URL={{ crawler_sqs_queue_url }} \
+  -e CRAWLER_S3_RAW_BUCKET={{ crawler_s3_raw_bucket }} \
+  -e CRAWLER_CLAIM_CHECK_THRESHOLD_BYTES={{ crawler_claim_check_threshold_bytes }} \
+  -e CRAWLER_LOG_LEVEL={{ crawler_log_level }} \
+  {{ crawler_ecr_repo_url }}:{{ crawler_image_tag }}
+
+ExecStop=/usr/bin/docker stop crawler-worker
+
+[Install]
+WantedBy=multi-user.target

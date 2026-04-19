@@ -1,0 +1,23 @@
+# Biến triển khai — đồng bộ Terraform demo (crawler-demo).
+# Mật khẩu DB: inventory/group_vars/crawler_demo/vault.yml (ansible-vault).
+
+crawler_aws_region: ap-southeast-1
+crawler_image_tag: latest
+
+crawler_ecr_repo_url: 478111025341.dkr.ecr.ap-southeast-1.amazonaws.com/crawler-demo-worker
+
+crawler_cwa_log_group_name: /ec2/crawler-demo-worker
+
+crawler_interval_seconds: 1800
+crawler_max_items_per_source: 100
+crawler_claim_check_threshold_bytes: 204800
+crawler_sqs_queue_url: https://sqs.ap-southeast-1.amazonaws.com/478111025341/crawler-demo-data-queue
+crawler_s3_raw_bucket: crawler-demo-raw-478111025341
+crawler_log_level: INFO
+
+crawler_web_port: 8080
+crawler_web_db_host: crawler-demo-db.cp0cysuikh53.ap-southeast-1.rds.amazonaws.com
+crawler_web_db_port: 5432
+crawler_web_db_name: crawlerdb
+crawler_web_db_user: crawler
+crawler_s3_exports_bucket: crawler-demo-exports-478111025341

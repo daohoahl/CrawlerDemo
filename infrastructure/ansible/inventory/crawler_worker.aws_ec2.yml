@@ -1,0 +1,23 @@
+# Inventory động EC2 — đuôi *.aws_ec2.yml
+# ansible_host đặt trong inventory/group_vars/crawler_demo/connection.yml (127.0.0.1), không compose ở đây —
+# compose dùng evaluate_expression(); literal "{{ '127.0.0.1' }}" có thể không gán được ansible_host.
+# Instance ID thực ở tên host (instance-id) → {{ inventory_hostname }} trong connection.yml.
+
+plugin: amazon.aws.aws_ec2
+
+regions:
+  - ap-southeast-1
+
+filters:
+  instance-state-name:
+    - running
+  tag:Role:
+    - crawler-worker
+  tag:Environment:
+    - demo
+
+hostnames:
+  - instance-id
+
+groups:
+  crawler_demo: "instance_id is defined"

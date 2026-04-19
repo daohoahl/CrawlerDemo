@@ -1,0 +1,25 @@
+---
+# Phải nằm dưới inventory/group_vars/ (cùng cấp thư mục với crawler_worker.aws_ec2.yml) — plugin host_group_vars
+# chỉ load group_vars kề file inventory, không load từ infrastructure/ansible/group_vars/.
+# SSH qua Session Manager (AWS-StartSSHSession). Không dùng plugin amazon.aws.aws_ssm.
+#
+# macOS/OpenSSH: nếu ansible_host = instance id (i-...), ssh có thể cố "resolve DNS" và lỗi
+# "Could not resolve hostname". Đặt ansible_host (và ansible_ssh_host) trực tiếp ở đây — chuỗi YAML,
+# không qua aws_ec2 compose (compose dùng evaluate_expression(); "{{ ... }}" dễ không áp dụng được).
+# Instance id cho SSM: {{ inventory_hostname }} trong ProxyCommand (tên host trong inventory = i-...).
+ansible_host: "127.0.0.1"
+ansible_ssh_host: "127.0.0.1"
+
+# Terraform: worker_ec2_key_name = tên key pair trong EC2; instance phải được launch sau khi key đó gắn vào LT.
+# Bắt buộc truyền private key khi chạy playbook (trừ khi ssh-agent đã có đúng key), ví dụ:
+#   -e ansible_ssh_private_key_file=$HOME/.ssh/your-key.pem
+# Lỗi "Permission denied (publickey)" = sai/thiếu .pem, hoặc instance không có public key tương ứng.
+
+ansible_connection: ssh
+ansible_user: ec2-user
+ansible_python_interpreter: /usr/bin/python3
+ansible_ssh_pipelining: true
+# Ansible gộp chuỗi này bằng shlex.split(): không được để ProxyCommand=... tách bởi khoảng trắng không bọc —
+# khi đó chỉ `aws` là giá trị ProxyCommand, `ssm` thành token thừa → aws CLI báo "command required".
+ansible_ssh_common_args: >-
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o "ProxyCommand=aws ssm start-session --region ap-southeast-1 --target {{ inventory_hostname }} --document-name AWS-StartSSHSession --parameters portNumber=22"

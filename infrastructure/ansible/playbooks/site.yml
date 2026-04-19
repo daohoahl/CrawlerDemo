@@ -1,0 +1,16 @@
+---
+# Triển khai cấu hình worker (Amazon Linux 2023) tương đương user_data Terraform.
+# Chạy từ thư mục infrastructure/ansible (mặc định inventory/crawler_worker.aws_ec2.yml trong ansible.cfg):
+#   ansible-playbook playbooks/site.yml --ask-vault-pass
+#
+# SSH thay vì SSM: ansible-playbook -i inventory/demo.yml playbooks/site.yml --ask-vault-pass
+
+- name: Crawler worker — Docker, CloudWatch, dịch vụ container
+  hosts: crawler_demo
+  # Không gather facts (tránh lỗi SSM/setup). Cài gói qua `dnf` trong shell, không dùng module dnf.
+  gather_facts: false
+  roles:
+    - role: base
+    - role: docker
+    - role: cloudwatch_agent
+    - role: crawler_services

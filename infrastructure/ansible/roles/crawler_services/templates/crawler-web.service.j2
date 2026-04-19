@@ -1,0 +1,23 @@
+[Unit]
+Description=Crawler Web Dashboard (Docker)
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=0
+
+ExecStartPre=-/usr/bin/docker rm -f crawler-web
+ExecStart=/usr/bin/docker run --rm --name crawler-web \
+  --log-driver=json-file \
+  --log-opt max-size=10m --log-opt max-file=3 \
+  -p {{ crawler_web_port }}:{{ crawler_web_port }} \
+  --env-file /etc/sysconfig/crawler-web \
+  {{ crawler_ecr_repo_url }}:{{ crawler_image_tag }} \
+  uvicorn crawlerdemo.webapp:app --host 0.0.0.0 --port {{ crawler_web_port }} --app-dir src
+
+ExecStop=/usr/bin/docker stop crawler-web
+
+[Install]
+WantedBy=multi-user.target

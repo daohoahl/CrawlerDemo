@@ -1,0 +1,9 @@
+# Tĩnh — tên host PHẢI là Instance ID (i-...) để {{ inventory_hostname }} trong ProxyCommand đúng.
+# ansible_host: 127.0.0.1 — tránh lỗi resolve hostname trên macOS.
+
+all:
+  children:
+    crawler_demo:
+      hosts:
+        i-REPLACE_WITH_INSTANCE_ID:
+          ansible_host: "127.0.0.1"

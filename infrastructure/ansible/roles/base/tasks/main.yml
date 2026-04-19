@@ -1,0 +1,15 @@
+---
+# `raw` ít xử lý hơn command/shell — tránh NoneType trong action plugin khi SSM trả output lạ.
+# AL2023: không cài gói `curl` — AMI đã có `curl-minimal` (/usr/bin/curl); `dnf install curl` xung đột với curl-minimal.
+- name: Cài gói tiện ích cơ bản
+  ansible.builtin.raw: /usr/bin/dnf install -y jq
+  register: _dnf_base
+  changed_when: true
+  failed_when: (_dnf_base.rc | default(-1)) != 0
+
+- name: Cập nhật bảo mật (optional, tag security-update)
+  ansible.builtin.raw: /usr/bin/dnf upgrade -y --security
+  register: _dnf_sec
+  changed_when: true
+  failed_when: (_dnf_sec.rc | default(-1)) != 0
+  tags: [never, security-update]

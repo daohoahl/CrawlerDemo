@@ -1,0 +1,8 @@
+# Sao chép thành vault.yml rồi mã hóa:
+#   ansible-vault encrypt inventory/group_vars/crawler_demo/vault.yml
+#
+# Hoặc tạo mật khẩu inline:
+#   ansible-vault encrypt_string 'your-db-password' --name crawler_web_db_password
+# và dán vào main.yml (không khuyến nghị commit).
+
+crawler_web_db_password: "REPLACE_WITH_REAL_PASSWORD"

@@ -1,7 +1,13 @@
 # Kiến trúc giải pháp & vận hành production (Solution Architecture)
 
-**Scope:** Crawler AWS — **Scope 1** (Production-ready tại quy mô nhỏ)  
-**Mục tiêu tài liệu:** Một **chuẩn SA** (business/technical scope, nguyên tắc, luồng, NFR, an toàn, capacity, HA, quan sát, CI/CD, checklist) **khớp 1:1** với **Terraform + GitHub Actions** trong repo.
+| | |
+|---|---|
+| **Sản phẩm / hệ thống** | Crawler & ingest bài viết web (RSS + Sitemap) lên PostgreSQL |
+| **Phiên bản kiến trúc** | **Scope 1** — production-ready tại quy mô nhỏ, ưu tiên kiểm soát chi phí & vận hành |
+| **Độc giả** | Solution / Cloud Architect, DevOps, chủ hệ thống |
+| **Căn cứ triển khai** | Mã nguồn `src/crawlerdemo/`, `infrastructure/terraform/`, `infrastructure/aws/lambda_ingester/` |
+
+**Mục tiêu tài liệu:** Một **báo cáo kiến trúc** (phạm vi nghiệp vụ + kỹ thuật cụ thể: crawl gì, cơ chế, dung lượng/giới hạn, dữ liệu ra vào) đồng thời **map 1:1** Terraform & CI/CD trong repo.
 
 | Khái niệm | Vị trí trong repo |
 |-----------|-------------------|
@@ -16,7 +22,7 @@
 
 ## Mục lục (11 phần — hệ thống chuẩn SA)
 
-1. [Phạm vi bài toán & yêu cầu phi chức năng (NFR)](#1-phạm-vi-bài-toán--yêu-cầu-phi-chức-năng-nfr)
+1. [Phạm vi bài toán & yêu cầu phi chức năng (NFR)](#1-phạm-vi-bài-toán--yêu-cầu-phi-chức-năng-nfr) — *báo cáo scope: crawl gì, cơ chế, nguồn URL, giới hạn batch/dung lượng, RDS/S3*
 2. [Kiến trúc tổng quan & danh mục thành phần](#2-kiến-trúc-tổng-quan--danh-mục-thành-phần)
 3. [Luồng dữ liệu end-to-end](#3-luồng-dữ-liệu-end-to-end)
 4. [Phân tích từng dịch vụ — lý do & map Terraform](#4-phân-tích-từng-dịch-vụ--lý-do--map-terraform)
@@ -34,35 +40,89 @@
 
 ## 1. Phạm vi bài toán & yêu cầu phi chức năng (NFR)
 
-### 1.1 Mục tiêu nghiệp vụ (Scope 1)
+Phần này là **phát biểu phạm vi nghiệp vụ + kỹ thuật** đủ chi tiết để độc lập với code: *hệ thống làm gì, thu thập từ đâu, theo cơ chế nào, giới hạn dung lượng / tần suất / batch như thế nào, dữ liệu lưu ra sao.*
 
-- Xây pipeline thu thập web **tách đôi producer/consumer:** `EC2 Worker → SQS Standard → Lambda Ingester → RDS PostgreSQL (+ S3)`.
-- Ưu tiên **ổn định**, **idempotency**, **giảm mất dữ liệu trong kỳ vọng hợp lý**, **kiểm soát chi phí**, và **sẵn sàng vận hành** (quan sát, cảnh báo) ngay từ phạm vi nhỏ.
+### 1.1 Tóm tắt điều hành
 
-### 1.2 Đầu vào & chuẩn hóa
+Hệ thống **định kỳ** đọc các **nguồn RSS và Sitemap công khai**, trích xuất các **bài viết** (định danh bằng URL đã chuẩn hóa), đóng gói vào **một hàng đợi message**, và **ghi idempotent** vào **PostgreSQL** nhờ **Lambda consumer**. Payload quá lớn so với giới hạn message được **offload (gzip)** sang **S3 (Claim Check)**. **Worker không ghi DB trực tiếp**; toàn bộ persist do tầng ingest. Dashboard web trên worker phục vụ **theo dõi** (phạm vi nhỏ), không phải API search công khai quy mô lớn.
 
-| Loại | Xử lý | Ghi chú SA |
-|------|--------|------------|
-| RSS | `crawl_rss`: link, title, summary, pubDate | Worker |
-| Sitemap | `crawl_sitemap`: `urlset` / `sitemapindex` lồng nhau | Worker |
-| URL | **Canonicalize** trước queue | Giảm trùng sớm; idempotency cuối cùng vẫn ở DB |
+### 1.2 Phát biểu bài toán (Problem statement)
 
-### 1.3 Các trường hợp xử lý chính → map kiến trúc / Terraform
+Cần một pipeline **ổn định — có thể mở rộng theo hướng tăng nguồn** — với các ràng buộc:
+
+- **Tách producer/consumer** để crawl không chặn ingest và ngược lại.
+- **Không nhân bản bản ghi** khi message SQS được giao **ít nhất một lần** (at-least-once).
+- **Tách poison/error** khỏi luồng nóng (DLQ).
+- **Kiểm soát chi phí và độ phức tạp** phù hợp lab / MVP (Single-AZ DB, NAT đơn, giới hạn concurrency Lambda).
+
+### 1.3 Miền dữ liệu (Domain model)
+
+| Khái niệm | Định nghĩa trong code | Lưu trữ đích (RDS) |
+|-----------|----------------------|--------------------|
+| **Bài viết (ArticleIn)** | Bản ghi crawl: `source`, `canonical_url`, `title`, `summary`, `published_at` | Bảng `articles` (`schema.sql` / DDL Lambda): `canonical_url` unique, `summary` TEXT (summary qua JSON bị **cắt 500 ký tự** khi serialize để giữ batch trong ngưỡng message — xem `src/crawlerdemo/models.py`) |
+| **Nguồn (source)** | Nhãn dạng `rss:<host>` / `sitemap:<host>` | Cột `source` (VARCHAR 120) |
+| **Khóa nghiệp vụ** | `canonical_url` sau **canonicalize** | `UNIQUE INDEX uq_articles_canonical_url` |
+
+### 1.4 Phạm vi thu thập: “crawl gì” và “từ đâu”
+
+**Phạm vi kỹ thuật:** chỉ **RSS/Atom** (qua thư viện **feedparser**) và **XML Sitemap** (qua **BeautifulSoup** parser XML). **Không** crawl HTML trang chủ hay deep-link từ trong bài trong scope mặc định này — chỉ URL xuất hiện trong feed hoặc sitemap.
+
+**Nguồn mặc định** (có thể ghi đè bằng biến môi trường JSON `CRAWLER_RSS_URLS` / `CRAWLER_SITEMAP_URLS` — xem `src/crawlerdemo/config.py`):
+
+| Loại | URL mặc định (đặt trong code) |
+|------|------------------------------|
+| RSS | `https://www.state.gov/rss/channels/prsreleases.xml`, `.../remarks.xml`, `.../briefings.xml`; `https://congbao.chinhphu.vn/cac-van-ban-moi-ban-hanh.rss` |
+| Sitemap | `https://www.theguardian.com/sitemaps/news.xml`; `https://en.baochinhphu.vn/sitemap.xml` |
+
+**Kỳ vọng pháp lý / điều khoản:** Nguồn chỉ mang tính **demo kỹ thuật**; môi trường production thực tế phải **tuân robots.txt, ToS, tần suất hợp lý** và whitelist IP (NAT) nếu site yêu cầu.
+
+### 1.5 Cơ chế thu thập (behavior)
+
+| Thành phần | Hành vi | File tham chiếu |
+|------------|---------|-----------------|
+| **RSS** | GET feed → parse từng entry: `link`, `title`, `summary`/`description`, `published`/`updated` | `src/crawlerdemo/sources/rss.py` |
+| **Sitemap** | GET sitemap → nếu **`<sitemapindex>`** thì **đệ quy** vào từng `<loc>` con (cho đến khi đủ `limit`); nếu **`<urlset>`** thì đọc `<url><loc>`, lấy `lastmod` nếu có, title suy luận từ URL nếu không có title riêng | `src/crawlerdemo/sources/sitemap.py` |
+| **Chuẩn hóa URL** | `canonicalize_url(...)` trước khi enqueue | `src/crawlerdemo/normalize.py` |
+| **Lập lịch** | **APScheduler** `interval`: mặc định **1800 s (30 phút)** một vòng crawl toàn bộ nguồn; **`max_instances=1`**, `coalesce=True` — không cho hai vòng chồng lấp trong cùng process | `src/crawlerdemo/worker.py` |
+| **Vòng crawl một lần** | Mỗi vòng có **`trace_id`** (UUID) chung log cho mọi nguồn | `run_once()` trong `worker.py` |
+| **HTTP** | `httpx`, timeout mặc định **20 s**/request; User-Agent mặc định `crawlerdemo/1.0` | `src/crawlerdemo/config.py`, `http.py` |
+
+### 1.6 Giới hạn khối lượng & kích thước (throughput / “dung lượng” trong thiết kế)
+
+| Tham số | Giá trị mặc định (ứng dụng) | Giá trị triển khai Terraform (demo) | Ý nghĩa |
+|---------|-----------------------------|--------------------------------------|--------|
+| **Số bài tối đa / mỗi URL nguồn / mỗi vòng** | `max_items_per_source = 100` | `module.worker`: **100** (`environments/demo/main.tf`) | Trần cứng số item parse mỗi RSS URL hoặc nhánh sitemap (sitemapindex đệ quy vẫn chịu chung “remaining” limit). |
+| **Kỳ crawl** | `interval_seconds = 1800` | `var.crawler_interval_seconds` (mặc định **1800**) | Tần suất chạy `run_once` trên worker. |
+| **Một message SQS chứa gì** | **Toàn bộ** danh sách `ArticleIn` của **một** nguồn (một RSS URL hoặc một nhánh sitemap đã gom) được serialize JSON **một lần** (`send_batch`) | — | Không phải 1 message / 1 bài; degree of batching theo **nguồn**. |
+| **Giới hạn SQS** | AWS **256 KiB**/message (Standard) | — | Thiết kế cố tình **dưới** ngưỡng đó. |
+| **Ngưỡng Claim Check** | **200 KiB** (`200 * 1024` bytes) trong `Settings` | **204800** (= 200 KiB) trong Terraform worker | Nếu `len(JSON UTF-8)` **>** ngưỡng **và** đã cấu hình `s3_raw_bucket`: gzip + put S3 + body SQS chỉ còn pointer `claim_check_s3_*`. |
+| **Cắt summary** | `summary` trong JSON payload tối đa **500** ký tự | — | Giảm nguy cơ vượt 256 KiB khi batch ~100 bài (`models.py`). |
+| **Lambda xử lý batch từ queue** | — | **10** records / invocation (ESM `batch_size`) | Song song ingest có giới hạn ESM (mặc định **5** batch). |
+| **Lưu trữ raw trên S3** | — | Lifecycle **xoá object raw sau 30 ngày** (`raw_expiration_days` mặc định module storage) | Raw chỉ phục vụ Claim Check trước khi ingest; không phải archive dài hạn. |
+| **RDS storage** | — | gp3 **20 GB** ban đầu, autoscale tối đa **100 GB** (mặc định module storage) | Giới hạn phình disk cho bảng `articles` và index. |
+
+### 1.7 Đầu ra & cam kết dữ liệu
+
+- **Persist:** Lambda upsert/idempotent `INSERT ... ON CONFLICT (canonical_url) DO NOTHING` → bảng `articles`.
+- **Dashboard:** FastAPI trên worker (cổng `web_port`, mặc định 8080) phía sau ALB — đọc DB để hiển thị; không mô tả chi API surface trong tài liệu này.
+
+### 1.8 Các kịch bản kỹ thuật (A–E) — map kiến trúc / Terraform
 
 | ID | Trường hợp | Hành vi | Map Terraform / code |
 |----|------------|--------|-------------------------|
 | **A** | Payload nhỏ | Body SQS chứa JSON trực tiếp | `module.queue` `aws_sqs_queue.main`; Producer: worker IAM `sqs:SendMessage` |
-| **B** | Payload lớn | Claim Check: gzip → `module.storage` **S3 raw** → pointer trên SQS | `aws_s3_bucket.raw`; ngưỡng bytes wire từ `module.worker`: `claim_check_threshold_bytes` (= **204800** trong `environments/demo/main.tf`) |
-| **C** | Trùng URL | `INSERT ... ON CONFLICT (canonical_url) DO NOTHING` + **unique index** | Logic Lambda `infrastructure/aws/lambda_ingester/lambda_function.py`; schema do app/lambda DDL |
-| **D** | Lỗi tạm | `ReportBatchItemFailures` — chỉ retry record lỗi | `aws_lambda_event_source_mapping.sqs` `function_response_types` (`modules/lambda/main.tf`) |
-| **E** | Poison message | Sau **3** lần nhận thất bại → **DLQ** | `max_receive_count = 3` → `redrive_policy` (`modules/queue/main.tf`); queue `aws_sqs_queue.dlq` |
+| **B** | Payload lớn | Claim Check: gzip → `module.storage` **S3 raw** → pointer trên SQS | `aws_s3_bucket.raw`; `claim_check_threshold_bytes` = **204800** trong `environments/demo/main.tf` |
+| **C** | Trùng URL | `ON CONFLICT DO NOTHING` + unique index | `lambda_function.py`; `infrastructure/aws/lambda_ingester/schema.sql` |
+| **D** | Lỗi tạm | `ReportBatchItemFailures` | `aws_lambda_event_source_mapping.sqs` (`modules/lambda/main.tf`) |
+| **E** | Poison | Sau **3** lần fail → **DLQ** | `max_receive_count = 3` (`modules/queue/main.tf`) |
 
-### 1.4 Ngoài scope (ghi rõ để tránh kỳ vọng sai)
+### 1.9 Ngoài scope (explicit)
 
-- API/query công khai quy mô lớn (chỉ có **dashboard qua ALB** trong thiết kế hiện tại).
-- RDS Proxy / read replica, multi-region active-active (hướng nâng cấp — xem [§9](#9-sẵn-sàng-cao-chịu-lỗi--điểm-đơn-lỗi-spof)).
+- API search/query **công khai** quy mô lớn; CDN; xác thực người dùng cho dashboard (chỉ HTTP public qua ALB trong demo).
+- Đọc **nội dung HTML full-text** từng trang bài (ngoài metadata feed/sitemap) — không nằm luồng crawl mặc định.
+- **RDS Proxy**, read replica, multi-region active-active (xem [§9](#9-sẵn-sàng-cao-chịu-lỗi--điểm-đơn-lỗi-spof)).
 
-### 1.5 NFR — bảng tóm tắt (Solution Architect)
+### 1.10 NFR — bảng tóm tắt (Solution Architect)
 
 | NFR | Mục tiêu thiết kế | Hiện thực trong repo |
 |-----|-------------------|----------------------|

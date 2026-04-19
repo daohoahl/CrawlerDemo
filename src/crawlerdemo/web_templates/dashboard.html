@@ -24,9 +24,36 @@
         </div>
         <nav class="nav">
           <a class="nav-link active" href="/">Articles</a>
+          <a class="nav-link" href="#s3-exports">S3 exports</a>
           <a class="nav-link" href="/docs" target="_blank" rel="noopener">API docs</a>
           <a class="nav-link" href="/health/ready" target="_blank" rel="noopener">DB readiness</a>
         </nav>
+        <div class="sidebar-block">
+          <div class="sidebar-label">Giao diện</div>
+          <button type="button" class="btn btn-ghost btn-block" id="themeToggle" title="Sáng / tối">
+            Đổi theme
+          </button>
+        </div>
+        <div class="sidebar-block">
+          <div class="sidebar-label">Bộ lọc đã lưu</div>
+          <select id="savedFilterSelect" class="sidebar-select" title="Chọn bộ lọc đã lưu">
+            <option value="">— Chưa chọn —</option>
+          </select>
+          <div class="sidebar-btn-row">
+            <button type="button" class="btn btn-ghost btn-sm" id="saveFilterBtn">Lưu</button>
+            <button type="button" class="btn btn-ghost btn-sm" id="deleteFilterBtn">Xóa</button>
+          </div>
+        </div>
+        <details class="sidebar-help">
+          <summary>Hướng dẫn nhanh</summary>
+          <ul>
+            <li><kbd>/</kbd> — focus ô tìm kiếm</li>
+            <li><kbd>Esc</kbd> — đóng chi tiết bài</li>
+            <li>Yêu thích lưu trên trình duyệt (không cần đăng nhập)</li>
+            <li>Export JSON/CSV theo trang &amp; filter hiện tại</li>
+            <li>S3 exports: liệt kê file trong bucket &amp; tải qua link có thời hạn</li>
+          </ul>
+        </details>
         <div class="sidebar-footer">
           <div class="status-line" id="statusLine">
             <span class="dot dot-pulse" id="statusDot" aria-hidden="true"></span>
@@ -40,8 +67,8 @@
           <div>
             <h1>Article catalogue</h1>
             <p class="lede">
-              Tìm kiếm theo tiêu đề / tóm tắt / URL, lọc theo nguồn, xuất JSON trang hiện tại, mở bài gốc. Tiêu đề được
-              suy ra tự động nếu crawler không có title (vd. sitemap).
+              Tìm kiếm full-text, lọc nguồn &amp; khoảng ngày (fetch/publish), xem chi tiết từng bài, đánh dấu yêu thích,
+              lưu bộ lọc, xuất dữ liệu. Không cần tài khoản — phù hợp demo / vận hành nội bộ.
             </p>
           </div>
         </header>
@@ -51,6 +78,54 @@
           <div class="kpi skeleton" data-kpi="24h">—</div>
           <div class="kpi skeleton" data-kpi="last">—</div>
           <div class="kpi kpi-wide skeleton" data-kpi="sources">—</div>
+        </section>
+
+        <section class="panel crawl-panel" aria-labelledby="crawlHeading">
+          <h2 id="crawlHeading" class="section-title">Crawl thủ công</h2>
+          <p class="section-lede">
+            Bấm để chạy <strong>một vòng</strong> crawl ngay (cùng nguồn RSS + sitemap như worker). Xử lý chạy nền; có thể trùng
+            lúc worker lịch — Lambda + DB vẫn idempotent.
+          </p>
+          <div class="crawl-actions">
+            <button type="button" class="btn btn-primary" id="crawlNowBtn">Crawl ngay</button>
+            <span class="crawl-status" id="crawlStatus" role="status"></span>
+          </div>
+        </section>
+
+        <section class="panel" id="s3-exports">
+          <h2 class="section-title">S3 — bucket exports</h2>
+          <p class="section-lede">
+            Liệt kê object trong bucket export (CSV/JSON). Tải file qua URL ký sẵn (presigned), hết hạn sau vài phút.
+            Bucket raw (claim-check HTML) không mở ở đây — chỉ worker ghi.
+          </p>
+          <div class="toolbar-row" style="margin-bottom: 0.75rem">
+            <label class="field grow">
+              <span class="field-label">Prefix (thư mục)</span>
+              <input id="s3Prefix" type="text" placeholder="Để trống = gốc bucket" autocomplete="off" />
+            </label>
+            <button type="button" class="btn btn-primary" id="s3RefreshBtn">Làm mới</button>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table s3-table">
+              <thead>
+                <tr>
+                  <th>Object key</th>
+                  <th class="col-s3-size">Size</th>
+                  <th class="col-dt">Modified</th>
+                  <th class="col-actions">Download</th>
+                </tr>
+              </thead>
+              <tbody id="s3tbody">
+                <tr>
+                  <td colspan="4" class="empty">Đang tải danh sách…</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="s3-footer">
+            <span id="s3summary" class="summary"></span>
+            <button type="button" class="btn btn-ghost" id="s3MoreBtn" hidden>Tiếp theo</button>
+          </div>
         </section>
 
         <section class="panel toolbar">
@@ -89,10 +164,41 @@
               </select>
             </label>
           </div>
+          <div class="toolbar-row toolbar-dates">
+            <label class="field">
+              <span class="field-label">Fetched từ (UTC)</span>
+              <input id="fetchedFrom" type="date" />
+            </label>
+            <label class="field">
+              <span class="field-label">Fetched đến</span>
+              <input id="fetchedTo" type="date" />
+            </label>
+            <label class="field">
+              <span class="field-label">Published từ</span>
+              <input id="publishedFrom" type="date" />
+            </label>
+            <label class="field">
+              <span class="field-label">Published đến</span>
+              <input id="publishedTo" type="date" />
+            </label>
+            <div class="quick-range">
+              <span class="field-label">Nhanh</span>
+              <button type="button" class="btn btn-ghost btn-sm" id="range7d" title="7 ngày gần nhất (theo fetched)">
+                7 ngày
+              </button>
+              <button type="button" class="btn btn-ghost btn-sm" id="range30d">30 ngày</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="clearDates">Xóa ngày</button>
+            </div>
+          </div>
           <div class="toolbar-actions">
             <button type="button" class="btn btn-primary" id="searchBtn">Apply filters</button>
             <button type="button" class="btn btn-ghost" id="resetBtn" title="Clear search &amp; filters">Reset</button>
-            <button type="button" class="btn btn-ghost" id="exportBtn" title="Download current page as JSON">Export page JSON</button>
+            <button type="button" class="btn btn-ghost" id="exportBtn" title="Download current page as JSON">Export JSON</button>
+            <button type="button" class="btn btn-ghost" id="exportCsvBtn" title="Download current page as CSV">Export CSV</button>
+            <label class="checkbox-inline">
+              <input type="checkbox" id="favoritesOnly" />
+              Chỉ yêu thích
+            </label>
           </div>
         </section>
 
@@ -110,6 +216,7 @@
             <table class="data-table">
               <thead>
                 <tr>
+                  <th class="col-star" aria-label="Favorite"></th>
                   <th class="col-id">#</th>
                   <th>Headline</th>
                   <th class="col-source">Source</th>
@@ -120,7 +227,7 @@
               </thead>
               <tbody id="tbody">
                 <tr>
-                  <td colspan="6" class="empty">Loading…</td>
+                  <td colspan="7" class="empty">Loading…</td>
                 </tr>
               </tbody>
             </table>
@@ -130,6 +237,20 @@
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <div id="articleModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" hidden>
+      <div class="modal-backdrop" id="modalBackdrop"></div>
+      <div class="modal-panel">
+        <header class="modal-head">
+          <h2 id="modalTitle">Chi tiết bài</h2>
+          <button type="button" class="btn btn-ghost modal-close" id="modalClose" aria-label="Đóng">&times;</button>
+        </header>
+        <div class="modal-body" id="modalBody">
+          <p class="muted">Đang tải…</p>
+        </div>
+      </div>
+    </div>
+
     <script src="/static/dashboard.js"></script>
   </body>
 </html>

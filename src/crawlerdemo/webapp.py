@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import logging
 import os
+import re
+import threading
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
+import boto3
 import psycopg
+from botocore.exceptions import ClientError
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -44,8 +49,54 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 settings = WebSettings()
 
+logger = logging.getLogger("crawlerdemo.webapp")
 
-def _where_clause(q: str | None, source: str | None) -> tuple[str, dict[str, object]]:
+_crawl_lock = threading.Lock()
+_manual_crawl_running = False
+
+
+def _exports_bucket() -> str:
+    return os.getenv("WEB_S3_EXPORTS_BUCKET", "").strip()
+
+
+def _s3_client():
+    region = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION") or "ap-southeast-1"
+    return boto3.client("s3", region_name=region)
+
+
+def _sanitize_s3_prefix(prefix: str) -> str:
+    return prefix.replace("..", "")[:500]
+
+
+def _safe_s3_key(key: str) -> str:
+    k = key.strip()
+    if not k or len(k) > 1024:
+        raise HTTPException(status_code=400, detail="Invalid object key")
+    if ".." in k or k.startswith("/"):
+        raise HTTPException(status_code=400, detail="Invalid object key")
+    return k
+
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _day_bounds_utc(day: str) -> tuple[datetime, datetime]:
+    """Inclusive [start, end] for a YYYY-MM-DD calendar day in UTC."""
+    d = datetime.strptime(day, "%Y-%m-%d").date()
+    start = datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+    end = start + timedelta(days=1) - timedelta(microseconds=1)
+    return start, end
+
+
+def _where_clause(
+    q: str | None,
+    source: str | None,
+    *,
+    fetched_from: str | None,
+    fetched_to: str | None,
+    published_from: str | None,
+    published_to: str | None,
+) -> tuple[str, dict[str, object]]:
     clauses: list[str] = []
     params: dict[str, object] = {}
 
@@ -55,6 +106,23 @@ def _where_clause(q: str | None, source: str | None) -> tuple[str, dict[str, obj
     if source:
         clauses.append("source = %(source)s")
         params["source"] = source
+
+    if fetched_from and _DATE_RE.match(fetched_from.strip()):
+        fs, _ = _day_bounds_utc(fetched_from.strip())
+        clauses.append("fetched_at >= %(fetched_from_ts)s")
+        params["fetched_from_ts"] = fs
+    if fetched_to and _DATE_RE.match(fetched_to.strip()):
+        _, fe = _day_bounds_utc(fetched_to.strip())
+        clauses.append("fetched_at <= %(fetched_to_ts)s")
+        params["fetched_to_ts"] = fe
+    if published_from and _DATE_RE.match(published_from.strip()):
+        ps, _ = _day_bounds_utc(published_from.strip())
+        clauses.append("published_at IS NOT NULL AND published_at >= %(published_from_ts)s")
+        params["published_from_ts"] = ps
+    if published_to and _DATE_RE.match(published_to.strip()):
+        _, pe = _day_bounds_utc(published_to.strip())
+        clauses.append("published_at IS NOT NULL AND published_at <= %(published_to_ts)s")
+        params["published_to_ts"] = pe
 
     if not clauses:
         return "", params
@@ -114,6 +182,10 @@ def health_ready() -> dict[str, str]:
 def list_articles(
     q: str | None = Query(default=None),
     source: str | None = Query(default=None),
+    fetched_from: str | None = Query(default=None, description="YYYY-MM-DD (UTC day start)"),
+    fetched_to: str | None = Query(default=None, description="YYYY-MM-DD (UTC day end, inclusive)"),
+    published_from: str | None = Query(default=None, description="YYYY-MM-DD"),
+    published_to: str | None = Query(default=None, description="YYYY-MM-DD"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     sort_by: Literal["fetched_at", "published_at"] = Query(default="fetched_at"),
@@ -121,7 +193,14 @@ def list_articles(
 ) -> dict[str, object]:
     offset = (page - 1) * page_size
     order_sql = f"{sort_by} {'ASC' if sort_order == 'asc' else 'DESC'}"
-    where_sql, params = _where_clause(q, source)
+    where_sql, params = _where_clause(
+        q,
+        source,
+        fetched_from=fetched_from,
+        fetched_to=fetched_to,
+        published_from=published_from,
+        published_to=published_to,
+    )
     params.update({"limit": page_size, "offset": offset})
 
     query_total = f"SELECT COUNT(*) FROM articles {where_sql}"
@@ -143,24 +222,50 @@ def list_articles(
     except Exception as exc:  # pragma: no cover
         raise HTTPException(status_code=500, detail=f"Query failed: {exc}") from exc
 
-    items = []
-    for r in rows:
-        title_raw = r[3]
-        summary_raw = r[4]
-        url_raw = r[2]
-        items.append(
-            {
-                "id": r[0],
-                "source": r[1],
-                "canonical_url": url_raw,
-                "title": title_raw,
-                "summary": summary_raw,
-                "display_title": _display_title(title_raw, summary_raw, url_raw),
-                "published_at": r[5].isoformat() if isinstance(r[5], datetime) else None,
-                "fetched_at": r[6].isoformat() if isinstance(r[6], datetime) else None,
-            }
-        )
+    items = [_row_to_article(r) for r in rows]
     return {"page": page, "page_size": page_size, "total": total, "items": items}
+
+
+def _row_to_article(row: tuple[object, ...]) -> dict[str, object]:
+    title_raw = row[3]
+    summary_raw = row[4]
+    url_raw = row[2]
+    return {
+        "id": row[0],
+        "source": row[1],
+        "canonical_url": url_raw,
+        "title": title_raw,
+        "summary": summary_raw,
+        "display_title": _display_title(
+            str(title_raw) if title_raw is not None else None,
+            str(summary_raw) if summary_raw is not None else None,
+            str(url_raw) if url_raw is not None else None,
+        ),
+        "published_at": row[5].isoformat() if isinstance(row[5], datetime) else None,
+        "fetched_at": row[6].isoformat() if isinstance(row[6], datetime) else None,
+    }
+
+
+@app.get("/api/articles/{article_id}")
+def get_article(article_id: int) -> dict[str, object]:
+    """Single article for detail modal."""
+    try:
+        with psycopg.connect(settings.dsn, connect_timeout=10) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, source, canonical_url, title, summary, published_at, fetched_at
+                    FROM articles WHERE id = %(id)s
+                    """,
+                    {"id": article_id},
+                )
+                row = cur.fetchone()
+    except Exception as exc:  # pragma: no cover
+        raise HTTPException(status_code=500, detail=f"Query failed: {exc}") from exc
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Article not found")
+    return _row_to_article(row)
 
 
 @app.get("/api/stats")
@@ -202,6 +307,75 @@ def api_stats() -> dict[str, object]:
     }
 
 
+@app.get("/api/s3/exports")
+def s3_list_exports(
+    prefix: str = Query(default=""),
+    max_keys: int = Query(default=50, ge=1, le=200),
+    continuation_token: str | None = Query(default=None),
+) -> dict[str, object]:
+    """
+    List objects in the configured exports bucket (CSV/JSON exports).
+    Requires IAM on the EC2 instance profile: s3:ListBucket, s3:GetObject.
+    """
+    bucket = _exports_bucket()
+    if not bucket:
+        raise HTTPException(
+            status_code=503,
+            detail="WEB_S3_EXPORTS_BUCKET is not set (configure on the web container).",
+        )
+    pre = _sanitize_s3_prefix(prefix)
+    kwargs: dict[str, object] = {
+        "Bucket": bucket,
+        "Prefix": pre,
+        "MaxKeys": max_keys,
+    }
+    if continuation_token:
+        kwargs["ContinuationToken"] = continuation_token
+    try:
+        out = _s3_client().list_objects_v2(**kwargs)
+    except ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"S3 list failed: {exc}") from exc
+
+    items = []
+    for obj in out.get("Contents") or []:
+        lm = obj.get("LastModified")
+        items.append(
+            {
+                "key": obj["Key"],
+                "size": int(obj.get("Size") or 0),
+                "last_modified": lm.isoformat() if isinstance(lm, datetime) else None,
+            }
+        )
+    return {
+        "bucket": bucket,
+        "prefix": pre,
+        "items": items,
+        "is_truncated": bool(out.get("IsTruncated")),
+        "next_continuation_token": out.get("NextContinuationToken"),
+    }
+
+
+@app.get("/api/s3/exports/presign")
+def s3_presign_export(
+    key: str = Query(..., min_length=1, max_length=1024),
+    expires_seconds: int = Query(default=900, ge=60, le=3600),
+) -> dict[str, str]:
+    """Return a time-limited HTTPS URL to download one object (browser or curl)."""
+    bucket = _exports_bucket()
+    if not bucket:
+        raise HTTPException(status_code=503, detail="WEB_S3_EXPORTS_BUCKET is not set.")
+    safe_key = _safe_s3_key(key)
+    try:
+        url = _s3_client().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": bucket, "Key": safe_key},
+            ExpiresIn=expires_seconds,
+        )
+    except ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"S3 presign failed: {exc}") from exc
+    return {"url": url, "expires_in": str(expires_seconds), "bucket": bucket, "key": safe_key}
+
+
 @app.get("/api/sources")
 def api_sources() -> dict[str, object]:
     """Distinct source labels for filter dropdown."""
@@ -218,6 +392,54 @@ def api_sources() -> dict[str, object]:
         raise HTTPException(status_code=500, detail=f"Sources query failed: {exc}") from exc
 
     return {"items": names}
+
+
+@app.post("/api/crawl/now")
+def crawl_now() -> dict[str, str]:
+    """
+    Chạy một vòng crawl ngay (cùng logic worker: RSS + sitemap → SQS).
+    Chạy trong thread nền; song song với worker lịch trình có thể trùng — ingest idempotent.
+    """
+    global _manual_crawl_running
+    if not os.getenv("CRAWLER_SQS_QUEUE_URL", "").strip():
+        raise HTTPException(
+            status_code=503,
+            detail="CRAWLER_SQS_QUEUE_URL chưa cấu hình trên web container.",
+        )
+    with _crawl_lock:
+        if _manual_crawl_running:
+            raise HTTPException(
+                status_code=409,
+                detail="Đã có một lần crawl thủ công đang chạy — đợi xong rồi thử lại.",
+            )
+        _manual_crawl_running = True
+
+    def _run() -> None:
+        global _manual_crawl_running
+        try:
+            from crawlerdemo.worker import run_once
+
+            logger.info("manual_crawl.start")
+            run_once()
+            logger.info("manual_crawl.done")
+        except Exception:
+            logger.exception("manual_crawl.failed")
+        finally:
+            with _crawl_lock:
+                _manual_crawl_running = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return {
+        "status": "started",
+        "message": "Đã bắt đầu một vòng crawl (đủ nguồn RSS + sitemap) trên nền.",
+    }
+
+
+@app.get("/api/crawl/status")
+def crawl_status() -> dict[str, bool]:
+    """Trạng thái crawl thủ công (không biết worker lịch trình)."""
+    with _crawl_lock:
+        return {"manual_running": _manual_crawl_running}
 
 
 @app.get("/", response_class=HTMLResponse)

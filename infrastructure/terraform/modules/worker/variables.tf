@@ -69,6 +69,11 @@ variable "s3_raw_bucket" {
   type        = string
 }
 
+variable "s3_exports_bucket" {
+  description = "S3 bucket name for CSV/JSON exports (web dashboard listing + download)"
+  type        = string
+}
+
 variable "interval_seconds" {
   description = "APScheduler interval between crawl cycles"
   type        = number

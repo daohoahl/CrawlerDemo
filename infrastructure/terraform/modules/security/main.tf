@@ -292,6 +292,23 @@ resource "aws_iam_role_policy" "worker_custom" {
         Resource = "arn:aws:s3:::${local.name_prefix}-raw-*/*"
       },
       {
+        Sid    = "S3ExportsReadDashboard"
+        Effect = "Allow"
+        Action = [
+          "s3:ListBucket",
+        ]
+        Resource = "arn:aws:s3:::${local.name_prefix}-exports-*"
+      },
+      {
+        Sid    = "S3ExportsGetObjects"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectVersion",
+        ]
+        Resource = "arn:aws:s3:::${local.name_prefix}-exports-*/*"
+      },
+      {
         Sid      = "KMSEncrypt"
         Effect   = "Allow"
         Action   = ["kms:Encrypt", "kms:GenerateDataKey", "kms:Decrypt"]

@@ -205,6 +205,7 @@ module "worker" {
 
   sqs_queue_url               = module.queue.main_queue_url
   s3_raw_bucket               = module.storage.s3_raw_bucket
+  s3_exports_bucket           = module.storage.s3_exports_bucket
   interval_seconds            = var.crawler_interval_seconds
   max_items_per_source        = 100
   claim_check_threshold_bytes = 204800 # 200 KB

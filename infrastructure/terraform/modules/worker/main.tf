@@ -88,6 +88,7 @@ locals {
     log_group_name              = aws_cloudwatch_log_group.worker.name
     sqs_queue_url               = var.sqs_queue_url
     s3_raw_bucket               = var.s3_raw_bucket
+    s3_exports_bucket           = var.s3_exports_bucket
     interval_seconds            = var.interval_seconds
     max_items_per_source        = var.max_items_per_source
     claim_check_threshold_bytes = var.claim_check_threshold_bytes

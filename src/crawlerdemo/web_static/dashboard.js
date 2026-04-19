@@ -38,6 +38,24 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
 }
 
+/** Consume Response body once; parse JSON when possible (ALB 502 often returns HTML). */
+async function parseFetchBody(res) {
+  const text = await res.text();
+  if (!text.trim()) {
+    return { text, data: null, jsonOk: false };
+  }
+  try {
+    return { text, data: JSON.parse(text), jsonOk: true };
+  } catch {
+    return { text, data: null, jsonOk: false };
+  }
+}
+
+function httpNonJsonMessage(status, text) {
+  const preview = text.replace(/\s+/g, " ").trim().slice(0, 240);
+  return `HTTP ${status}: phản hồi không phải JSON${preview ? ` — ${preview}` : " (rỗng)"}`;
+}
+
 function showToast(message) {
   toastEl.textContent = message;
   toastEl.hidden = false;
@@ -597,18 +615,18 @@ async function loadS3Exports(append) {
 
   let res;
   try {
-    res = await fetch(`/api/s3/exports?${params}`);
+    res = await fetch(`/api/s3/exports?${params}`, { headers: { Accept: "application/json" } });
   } catch (e) {
     s3tbody.innerHTML = `<tr><td colspan="4" class="empty">Lỗi mạng: ${esc(String(e))}</td></tr>`;
     s3summary.textContent = "";
     s3MoreBtn.hidden = true;
     return;
   }
-  let data;
-  try {
-    data = await res.json();
-  } catch {
-    s3tbody.innerHTML = '<tr><td colspan="4" class="empty">Phản hồi không phải JSON</td></tr>';
+  const { text, data, jsonOk } = await parseFetchBody(res);
+  if (!jsonOk) {
+    s3tbody.innerHTML = `<tr><td colspan="4" class="empty">${esc(httpNonJsonMessage(res.status, text))}</td></tr>`;
+    s3summary.textContent = "";
+    s3MoreBtn.hidden = true;
     return;
   }
   if (!res.ok) {
@@ -640,8 +658,14 @@ async function loadS3Exports(append) {
     btn.addEventListener("click", async () => {
       const key = btn.getAttribute("data-s3-dl");
       try {
-        const pr = await fetch(`/api/s3/exports/presign?key=${encodeURIComponent(key)}`);
-        const pd = await pr.json();
+        const pr = await fetch(`/api/s3/exports/presign?key=${encodeURIComponent(key)}`, {
+          headers: { Accept: "application/json" },
+        });
+        const { text: pt, data: pd, jsonOk: pj } = await parseFetchBody(pr);
+        if (!pj) {
+          showToast(httpNonJsonMessage(pr.status, pt));
+          return;
+        }
         if (!pr.ok) {
           showToast(typeof pd.detail === "string" ? pd.detail : "Presign failed");
           return;
@@ -668,8 +692,12 @@ let crawlPollTimer = null;
 
 async function refreshCrawlStatus() {
   try {
-    const res = await fetch("/api/crawl/status");
-    const data = await res.json();
+    const res = await fetch("/api/crawl/status", { headers: { Accept: "application/json" } });
+    const { text, data, jsonOk } = await parseFetchBody(res);
+    if (!jsonOk || data == null) {
+      crawlStatus.textContent = httpNonJsonMessage(res.status, text);
+      return false;
+    }
     const running = Boolean(data.manual_running);
     crawlNowBtn.disabled = running;
     crawlStatus.textContent = running ? "Đang chạy crawl thủ công…" : "Sẵn sàng.";
@@ -685,8 +713,17 @@ crawlNowBtn.addEventListener("click", async () => {
   crawlNowBtn.disabled = true;
   crawlStatus.textContent = "Đang gửi yêu cầu…";
   try {
-    const res = await fetch("/api/crawl/now", { method: "POST" });
-    const data = await res.json().catch(() => ({}));
+    const res = await fetch("/api/crawl/now", {
+      method: "POST",
+      headers: { Accept: "application/json" },
+    });
+    const { text, data, jsonOk } = await parseFetchBody(res);
+    if (!jsonOk) {
+      showToast(httpNonJsonMessage(res.status, text));
+      crawlNowBtn.disabled = false;
+      crawlStatus.textContent = "Sẵn sàng.";
+      return;
+    }
     if (!res.ok) {
       const msg = typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail || data);
       showToast(msg);

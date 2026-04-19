@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 import boto3
 import psycopg
+from botocore.config import Config
 from botocore.exceptions import ClientError
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -61,7 +62,12 @@ def _exports_bucket() -> str:
 
 def _s3_client():
     region = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION") or "ap-southeast-1"
-    return boto3.client("s3", region_name=region)
+    cfg = Config(
+        connect_timeout=5,
+        read_timeout=30,
+        retries={"max_attempts": 3, "mode": "standard"},
+    )
+    return boto3.client("s3", region_name=region, config=cfg)
 
 
 def _sanitize_s3_prefix(prefix: str) -> str:
@@ -334,6 +340,9 @@ def s3_list_exports(
     try:
         out = _s3_client().list_objects_v2(**kwargs)
     except ClientError as exc:
+        raise HTTPException(status_code=502, detail=f"S3 list failed: {exc}") from exc
+    except Exception as exc:  # pragma: no cover
+        logger.exception("S3 list_objects_v2 failed")
         raise HTTPException(status_code=502, detail=f"S3 list failed: {exc}") from exc
 
     items = []

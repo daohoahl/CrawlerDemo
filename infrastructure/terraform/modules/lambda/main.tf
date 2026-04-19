@@ -69,13 +69,13 @@ resource "aws_lambda_function" "ingester" {
 
   environment {
     variables = {
-      RDS_HOST            = var.rds_endpoint
-      DB_NAME             = var.db_name
-      DB_USER             = var.db_username
-      DB_PASSWORD         = var.db_password
-      LOG_LEVEL           = "INFO"
-      S3_EXPORTS_BUCKET   = var.s3_exports_bucket
-      S3_EXPORTS_PREFIX   = var.s3_exports_prefix
+      RDS_HOST          = var.rds_endpoint
+      DB_NAME           = var.db_name
+      DB_USER           = var.db_username
+      DB_PASSWORD       = var.db_password
+      LOG_LEVEL         = "INFO"
+      S3_EXPORTS_BUCKET = var.s3_exports_bucket
+      S3_EXPORTS_PREFIX = var.s3_exports_prefix
     }
   }
 

@@ -353,38 +353,62 @@ const s3MoreBtn = document.getElementById("s3MoreBtn");
 const s3summary = document.getElementById("s3summary");
 let s3NextToken = null;
 
-/** sessionStorage: sau khi bấm Tải, ~1 giờ ẩn nút Tải (presigned hết hạn theo quy ước UI). */
-const S3_PRESIGN_AT_PREFIX = "crawler_s3_presign_at_";
-const S3_PRESIGN_TTL_MS = 3600 * 1000;
+/** Thời điểm lần tải đầu tiên thành công — sau 1 giờ ẩn nút Tải vĩnh viễn (phiên trình duyệt này). */
+const S3_FIRST_DL_AT_PREFIX = "crawler_s3_first_dl_at_";
+const S3_DOWNLOAD_WINDOW_MS = 3600 * 1000;
 
-function s3PresignStorageKey(objectKey) {
-  return S3_PRESIGN_AT_PREFIX + objectKey;
+function s3FirstDlStorageKey(objectKey) {
+  return S3_FIRST_DL_AT_PREFIX + objectKey;
 }
 
-function s3PresignCooldownLeftMs(objectKey) {
+function s3DownloadWindowClosed(objectKey) {
   try {
-    const raw = sessionStorage.getItem(s3PresignStorageKey(objectKey));
-    if (!raw) return 0;
-    const at = Number(raw);
-    if (Number.isNaN(at)) return 0;
-    const left = S3_PRESIGN_TTL_MS - (Date.now() - at);
-    return left > 0 ? left : 0;
+    const raw = sessionStorage.getItem(s3FirstDlStorageKey(objectKey));
+    if (!raw) return false;
+    const t0 = Number(raw);
+    if (Number.isNaN(t0)) return false;
+    return Date.now() - t0 >= S3_DOWNLOAD_WINDOW_MS;
   } catch {
-    return 0;
+    return false;
   }
-}
-
-function formatPresignCooldownShort(ms) {
-  const m = Math.ceil(ms / 60000);
-  return m < 1 ? "<1 phút" : `~${m} phút`;
 }
 
 function renderS3ActionCell(objectKey) {
-  const left = s3PresignCooldownLeftMs(objectKey);
-  if (left > 0) {
-    return `<span class="muted" title="Link presigned thường ~1 giờ; sau đó bấm Lấy link mới.">Đã tạo (${formatPresignCooldownShort(left)})</span> <button type="button" class="btn btn-ghost btn-sm" data-s3-renew="${esc(objectKey)}">Lấy link mới</button>`;
+  if (s3DownloadWindowClosed(objectKey)) {
+    return `<span class="muted" title="Đã quá 1 giờ kể từ lần tải đầu tiên — không còn tải qua dashboard (phiên này).">—</span>`;
   }
   return `<button type="button" class="btn btn-ghost btn-sm" data-s3-dl="${esc(objectKey)}">Tải</button>`;
+}
+
+function markFirstS3Download(objectKey) {
+  try {
+    const k = s3FirstDlStorageKey(objectKey);
+    if (!sessionStorage.getItem(k)) {
+      sessionStorage.setItem(k, String(Date.now()));
+    }
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+/** Cập nhật ô hành động khi vừa qua 1 giờ (không cần F5). */
+function tickS3DownloadExpiry() {
+  if (!s3tbody) return;
+  s3tbody.querySelectorAll("tr[data-s3-row-key]").forEach((tr) => {
+    const enc = tr.getAttribute("data-s3-row-key");
+    if (!enc) return;
+    let key;
+    try {
+      key = decodeURIComponent(enc);
+    } catch {
+      return;
+    }
+    if (!s3DownloadWindowClosed(key)) return;
+    const td = tr.querySelector(".col-actions");
+    if (td && td.querySelector("[data-s3-dl]")) {
+      td.innerHTML = renderS3ActionCell(key);
+    }
+  });
 }
 
 async function openS3Presign(objectKey) {
@@ -402,11 +426,7 @@ async function openS3Presign(objectKey) {
     return;
   }
   window.open(pd.url, "_blank", "noopener,noreferrer");
-  try {
-    sessionStorage.setItem(s3PresignStorageKey(objectKey), String(Date.now()));
-  } catch {
-    /* quota / private mode */
-  }
+  markFirstS3Download(objectKey);
   loadS3Exports(false);
 }
 
@@ -453,8 +473,9 @@ async function loadS3Exports(append) {
   if (!append) s3tbody.innerHTML = "";
   const rows = (data.items || []).map((obj) => {
     const key = obj.key;
+    const rowAttr = `data-s3-row-key="${encodeURIComponent(key)}"`;
     const lm = obj.last_modified ? formatRel(obj.last_modified) : "—";
-    return `<tr>
+    return `<tr ${rowAttr}>
       <td class="s3-key"><code>${esc(key)}</code></td>
       <td class="col-s3-size">${formatBytes(obj.size || 0)}</td>
       <td class="col-dt">${lm}</td>
@@ -469,23 +490,10 @@ async function loadS3Exports(append) {
 
   s3NextToken = data.next_continuation_token || null;
   s3MoreBtn.hidden = !data.is_truncated || !s3NextToken;
-  s3summary.textContent = `Bucket: ${esc(data.bucket || "")} · ${(data.items || []).length} object — sau khi bấm Tải, ~1 giờ không hiện lại Tải (dùng Lấy link mới nếu cần)`;
+  s3summary.textContent = `Bucket: ${esc(data.bucket || "")} · ${(data.items || []).length} object — sau lần tải đầu tiên, quá 1 giờ sẽ ẩn nút Tải (phiên trình duyệt này)`;
 }
 
 s3tbody.addEventListener("click", async (ev) => {
-  const renew = ev.target.closest("[data-s3-renew]");
-  if (renew) {
-    const key = renew.getAttribute("data-s3-renew");
-    if (key) {
-      try {
-        sessionStorage.removeItem(s3PresignStorageKey(key));
-      } catch {
-        /* ignore */
-      }
-      loadS3Exports(false);
-    }
-    return;
-  }
   const dl = ev.target.closest("[data-s3-dl]");
   if (!dl) return;
   const key = dl.getAttribute("data-s3-dl");
@@ -588,3 +596,9 @@ loadSources();
 loadStatus();
 loadData();
 loadS3Exports(false);
+
+setInterval(() => {
+  if (document.visibilityState === "visible") {
+    tickS3DownloadExpiry();
+  }
+}, 10000);

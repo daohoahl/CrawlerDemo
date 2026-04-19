@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     # ── APScheduler ─────────────────────────────────────────────────────────
     # schedule_mode=once  → run a single cycle and exit (useful for EventBridge/cron)
     # schedule_mode=interval → keep the process alive and run every N seconds
-    schedule_mode: Literal["once", "interval"] = "interval"
+    # schedule_mode=idle → process stays up; no scheduled crawl (use dashboard POST /api/crawl)
+    schedule_mode: Literal["once", "interval", "idle"] = "interval"
     interval_seconds: int = 1800  # 30 minutes
 
     # ── AWS (injected by Terraform / instance metadata) ────────────────────

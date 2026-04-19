@@ -5,10 +5,11 @@ Lifecycle on the host
 ---------------------
 1. systemd (via user_data) starts the Docker container at boot.
 2. Container entrypoint → ``python -m crawlerdemo.worker``.
-3. This module starts an APScheduler BackgroundScheduler that calls
-   :func:`run_once` every ``interval_seconds``.
-4. ``max_instances=1`` guarantees that a long-running cycle never overlaps
-   with the next trigger *within this process*.
+3. With ``CRAWLER_SCHEDULE_MODE=interval``, APScheduler calls :func:`run_once`
+   every ``interval_seconds``. With ``schedule_mode=idle``, no timer runs —
+   use the dashboard ``POST /api/crawl`` instead.
+4. ``max_instances=1`` (interval mode) guarantees that a long-running cycle
+   never overlaps with the next trigger *within this process*.
 5. Each cycle pulls the configured RSS + sitemap sources, normalises the
    URLs, and ships the resulting ArticleIn batch to SQS Standard.
    When the JSON payload approaches the 256 KB SQS limit, the Claim Check
@@ -119,6 +120,9 @@ def run_forever() -> None:
     ``max_instances=1`` prevents two overlapping executions within this
     process.  ``coalesce=True`` collapses missed triggers (e.g. after a long
     pause) into a single catch-up run instead of a burst.
+
+    ``schedule_mode=idle`` keeps the container alive for ops/logging but does
+    not run crawls on a timer (trigger via dashboard ``POST /api/crawl``).
     """
     s = get_settings()
     logging.basicConfig(
@@ -128,6 +132,23 @@ def run_forever() -> None:
 
     if s.schedule_mode == "once":
         run_once()
+        return
+
+    if s.schedule_mode == "idle":
+        log.info("scheduler.idle no automatic crawl; use POST /api/crawl on the web app")
+        stop_event = {"stop": False}
+
+        def _on_signal(signum, _frame):  # pragma: no cover
+            log.info("signal.received signum=%s, shutting down", signum)
+            stop_event["stop"] = True
+
+        signal.signal(signal.SIGTERM, _on_signal)
+        signal.signal(signal.SIGINT, _on_signal)
+        try:
+            while not stop_event["stop"]:
+                time.sleep(1)
+        finally:
+            log.info("scheduler.idle stopped")
         return
 
     scheduler = BackgroundScheduler(

@@ -43,10 +43,14 @@
           <div>
             <h1>Bài đã crawl</h1>
             <p class="lede">
-              Tìm kiếm và lọc theo nguồn, ngày fetch/publish. Crawl chạy tự động trên worker — không cần thao tác thêm.
+              Tìm kiếm và lọc theo nguồn, ngày fetch/publish. <strong>Crawl không chạy theo lịch</strong> — bấm <strong>Crawl ngay</strong> để thu thập tại thời điểm đó (chạy nền, có thể vài phút).
               Cột <strong>Fetch</strong> trong ~24 giờ gần đây hiển thị dạng tương đối (vd. «4 giờ» = bài được fetch cách đây 4 giờ), không phải chỉ lọc 4 giờ.
               Tổng số bài trong DB xem ô <strong>Tổng bài</strong>; bảng bên dưới là phân trang (vd. 20/trang).
             </p>
+            <div class="toolbar-row page-head-actions" style="margin-top: 0.75rem">
+              <button type="button" class="btn btn-primary" id="crawlNowBtn">Crawl ngay</button>
+              <span id="crawlStatus" class="muted" aria-live="polite"></span>
+            </div>
           </div>
         </header>
 

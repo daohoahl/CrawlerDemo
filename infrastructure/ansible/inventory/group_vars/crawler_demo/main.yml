@@ -9,6 +9,8 @@ crawler_ecr_repo_url: 478111025341.dkr.ecr.ap-southeast-1.amazonaws.com/crawler-
 crawler_cwa_log_group_name: /ec2/crawler-demo-worker
 
 crawler_interval_seconds: 1800
+# idle = không crawl theo lịch; crawl thủ công qua nút trên dashboard (POST /api/crawl)
+crawler_schedule_mode: idle
 crawler_max_items_per_source: 100
 crawler_claim_check_threshold_bytes: 204800
 crawler_sqs_queue_url: https://sqs.ap-southeast-1.amazonaws.com/478111025341/crawler-demo-data-queue

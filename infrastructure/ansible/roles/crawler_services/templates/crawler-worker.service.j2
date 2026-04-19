@@ -12,7 +12,7 @@ ExecStartPre=-/usr/bin/docker rm -f crawler-worker
 ExecStart=/usr/bin/docker run --rm --name crawler-worker \
   --log-driver=json-file \
   --log-opt max-size=10m --log-opt max-file=3 \
-  -e CRAWLER_SCHEDULE_MODE=interval \
+  -e CRAWLER_SCHEDULE_MODE={{ crawler_schedule_mode }} \
   -e CRAWLER_INTERVAL_SECONDS={{ crawler_interval_seconds }} \
   -e CRAWLER_MAX_ITEMS_PER_SOURCE={{ crawler_max_items_per_source }} \
   -e CRAWLER_AWS_REGION={{ crawler_aws_region }} \

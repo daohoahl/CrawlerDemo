@@ -27,6 +27,8 @@ const modalTitle = document.getElementById("modalTitle");
 const modalBackdrop = document.getElementById("modalBackdrop");
 const modalClose = document.getElementById("modalClose");
 const themeToggle = document.getElementById("themeToggle");
+const crawlNowBtn = document.getElementById("crawlNowBtn");
+const crawlStatusEl = document.getElementById("crawlStatus");
 
 function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -440,6 +442,73 @@ async function loadS3Exports(append) {
 s3RefreshBtn.addEventListener("click", () => loadS3Exports(false));
 s3MoreBtn.addEventListener("click", () => loadS3Exports(true));
 s3PrefixEl.addEventListener("change", () => loadS3Exports(false));
+
+function setCrawlUi(busy, message) {
+  if (crawlNowBtn) crawlNowBtn.disabled = !!busy;
+  if (crawlStatusEl) crawlStatusEl.textContent = message || "";
+}
+
+async function pollCrawlUntilDone() {
+  for (let i = 0; i < 600; i += 1) {
+    await new Promise((r) => setTimeout(r, 1000));
+    let st;
+    try {
+      st = await fetch("/api/crawl/status", { headers: { Accept: "application/json" } });
+    } catch {
+      setCrawlUi(false, "Không kiểm tra được trạng thái crawl.");
+      return;
+    }
+    const { data, jsonOk } = await parseFetchBody(st);
+    if (!jsonOk || !st.ok) {
+      setCrawlUi(false, "Lỗi kiểm tra trạng thái crawl.");
+      return;
+    }
+    if (!data.busy) {
+      if (data.last_error) {
+        showToast(`Crawl lỗi: ${data.last_error}`);
+        setCrawlUi(false, "");
+      } else {
+        showToast("Crawl xong — đang làm mới danh sách.");
+        setCrawlUi(false, "");
+        await loadStats();
+        await loadData();
+      }
+      return;
+    }
+    setCrawlUi(true, "Đang crawl…");
+  }
+  setCrawlUi(false, "Hết thời gian chờ (thử làm mới trang).");
+}
+
+async function triggerCrawl() {
+  if (!crawlNowBtn) return;
+  setCrawlUi(true, "Đang crawl…");
+  try {
+    const res = await fetch("/api/crawl", { method: "POST", headers: { Accept: "application/json" } });
+    const { text, data, jsonOk } = await parseFetchBody(res);
+    if (res.status === 409) {
+      showToast(typeof data?.detail === "string" ? data.detail : "Đang crawl rồi.");
+      await pollCrawlUntilDone();
+      return;
+    }
+    if (!jsonOk || !res.ok) {
+      setCrawlUi(false, "");
+      showToast(jsonOk && data?.detail ? String(data.detail) : httpNonJsonMessage(res.status, text));
+      return;
+    }
+    showToast(data.message || "Đã bắt đầu crawl.");
+    await pollCrawlUntilDone();
+  } catch (e) {
+    setCrawlUi(false, "");
+    showToast(String(e));
+  }
+}
+
+if (crawlNowBtn) {
+  crawlNowBtn.addEventListener("click", () => {
+    triggerCrawl();
+  });
+}
 
 initTheme();
 loadStats();

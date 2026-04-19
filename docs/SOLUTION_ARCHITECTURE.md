@@ -1,8 +1,8 @@
 # Kiến Trúc Giải Pháp — Web Crawler & Ingestion Pipeline trên AWS
 
-> **Phiên bản:** 1.1 | **Môi trường:** `demo` | **Prefix tài nguyên:** `crawler-demo-*`
+> **Phiên bản:** 1.2 | **Môi trường:** `demo` | **Prefix tài nguyên:** `crawler-demo-*`
 > **Phạm vi:** Scope 1 — Production-ready, chi phí kiểm soát, quy mô nhỏ
-> **Ngôn ngữ IaC:** Terraform ≥ 1.5 | **Config Management:** Ansible | **Runtime:** Python 3.12
+> **Ngôn ngữ IaC:** Terraform ≥ 1.5 | **Config Management:** Ansible | **Runtime:** Python 3.11 (image Docker worker/web), Python 3.12 (Lambda ingester)
 
 ---
 
@@ -47,20 +47,30 @@ Hệ thống thu thập nội dung bài viết từ các nguồn web (RSS feed v
 **Nguồn crawl được hỗ trợ:**
 - RSS 2.0 / Atom feeds
 - Sitemap XML (sitemap index + sitemap URL)
-- Giới hạn: `max_items_per_source = 100` bài/nguồn/chu kỳ
+- Giới hạn: `max_items_per_source = 100` bài/nguồn/chu kỳ (mặc định trong `config.py`, có thể ghi đè bằng `CRAWLER_MAX_ITEMS_PER_SOURCE`)
+
+Danh sách URL mặc định nằm trong `src/crawlerdemo/config.py` (ví dụ nguồn State Department, Chính phủ, The Guardian…). Có thể ghi đè bằng biến môi trường JSON: `CRAWLER_RSS_URLS='["https://..."]'`, `CRAWLER_SITEMAP_URLS='["https://..."]'`.
 
 ### 1.3 Cơ chế thu thập
 
-Worker chạy **liên tục** (`schedule_mode=interval`) theo vòng lặp APScheduler. Khi container khởi động, **một cycle được chạy ngay lập tức** (không chờ hết interval đầu tiên), sau đó lặp lại mỗi `crawler_interval_seconds = 1800` (30 phút). Mỗi chu kỳ:
+**Một “cycle” crawl** (`run_once` trong code) luôn thực hiện cùng pipeline:
 
-1. Đọc danh sách nguồn từ cấu hình (env vars `CRAWLER_RSS_URLS`, `CRAWLER_SITEMAP_URLS`)
-2. Fetch RSS/Sitemap, parse, chuẩn hóa thành danh sách article dict
+1. Đọc danh sách nguồn từ cấu hình (mặc định trong `config.py` hoặc ghi đè bằng `CRAWLER_RSS_URLS` / `CRAWLER_SITEMAP_URLS`)
+2. Fetch RSS/Sitemap, parse, chuẩn hóa thành danh sách article dict (nhãn nguồn dạng `rss:domain` hoặc `sitemap:domain`)
 3. Nếu payload ≤ 200 KiB → gửi inline JSON array vào SQS
-4. Nếu payload > 200 KiB → upload lên S3 raw bucket, gửi Claim Check pointer vào SQS
+4. Nếu payload > 200 KiB → upload lên S3 raw bucket (prefix mặc định `raw/`), gửi Claim Check pointer vào SQS
 
-**Chế độ `schedule_mode=once`:** Chạy đúng một cycle rồi thoát — dùng cho EventBridge Scheduled Rule hoặc test thủ công.
+**Ba chế độ lập lịch (`CRAWLER_SCHEDULE_MODE`):**
 
-**Graceful shutdown:** Worker bắt `SIGTERM` / `SIGINT` (từ `docker stop` hoặc systemd), chờ APScheduler hoàn thành cycle hiện tại trước khi thoát (`scheduler.shutdown(wait=True)`).
+| Giá trị | Hành vi worker container |
+|---|---|
+| `interval` | APScheduler gọi `run_once` định kỳ. **Khi boot:** chạy **một cycle ngay** (không chờ hết interval đầu), sau đó lặp mỗi `CRAWLER_INTERVAL_SECONDS` (mặc định 1800). |
+| `once` | Chạy đúng một cycle rồi thoát — phù hợp cron/EventBridge hoặc test. |
+| `idle` | **Không** lên lịch crawl trong worker: process chỉ chờ tín hiệu dừng (`SIGTERM`/`SIGINT`). Crawl theo nhu cầu thực hiện qua **dashboard**: endpoint `POST /api/crawl` trên container `crawler-web` gọi cùng hàm `run_once` trong thread nền (cần inject `CRAWLER_SQS_QUEUE_URL`, `CRAWLER_S3_RAW_BUCKET`, v.v. vào container web — đã có trong `user_data` và template Ansible). |
+
+**Triển khai demo hiện tại:** `inventory/group_vars/crawler_demo/main.yml` đặt `crawler_schedule_mode: idle` để tránh crawl theo timer; vận hành qua nút “Crawl” trên UI (hoặc gọi API). Terraform `user_data` cũng bootstrap worker với `CRAWLER_SCHEDULE_MODE=idle` để đồng bộ hành vi mặc định trên instance mới.
+
+**Graceful shutdown:** Với `interval`, worker bắt `SIGTERM` / `SIGINT`, chờ APScheduler shutdown (`wait=True`) sau khi cycle hiện tại kết thúc. Với `idle`, vòng lặp chờ tín hiệu thoát sạch không có job crawl đang chạy trong worker (crawl tay chạy trong process `crawler-web`).
 
 ### 1.4 Giới hạn kỹ thuật (Scope 1)
 
@@ -69,7 +79,7 @@ Worker chạy **liên tục** (`schedule_mode=interval`) theo vòng lặp APSche
 | Worker instances | 1–2 (ASG) | Chi phí t3.micro |
 | Lambda concurrency | tối đa 5 (ESM) | Bảo vệ RDS t3.micro |
 | RDS | db.t3.micro, Single-AZ | Free Tier / chi phí |
-| Crawl interval | 30 phút | Tránh bị block bởi nguồn |
+| Crawl interval (khi `interval`) | 30 phút mặc định | Tránh bị block bởi nguồn; với `idle` không áp dụng — tần suất do thao tác tay |
 | Items/source/cycle | 100 | Giới hạn throughput |
 | S3 raw retention | 30 ngày | Tiết kiệm storage |
 | ECR images giữ lại | 10 | Tiết kiệm storage |
@@ -83,6 +93,7 @@ Worker chạy **liên tục** (`schedule_mode=interval`) theo vòng lặp APSche
 | **C — Duplicate URL** | URL đã tồn tại trong DB | `ON CONFLICT DO NOTHING` — bỏ qua, không lỗi, không duplicate |
 | **D — Lambda failure** | Exception trong Lambda (DB down, parse error) | `ReportBatchItemFailures` → chỉ record lỗi quay lại SQS, tối đa 3 lần → DLQ |
 | **E — Worker crash** | EC2 instance bị terminate | ASG tự thay thế instance mới trong AZ khác; systemd `Restart=always` |
+| **F — Crawl tay trùng lặp** | Hai request `POST /api/crawl` chồng nhau | Request thứ hai nhận HTTP **409** (`busy: true` từ `GET /api/crawl/status`); chỉ một `run_once` tại một thời điểm trong process web |
 
 ### 1.6 Out-of-scope (Scope 1)
 
@@ -166,6 +177,7 @@ Luồng dữ liệu chính:
   Internet → Worker (NAT) → SQS → Lambda → RDS PostgreSQL
                                          → S3 raw (Claim Check)
   Internet → ALB → Worker (crawler-web) → RDS (read-only dashboard)
+  (Khi schedule_mode=idle) Operator → ALB → POST /api/crawl → run_once (trên crawler-web) → SQS → …
 ```
 
 ### 2.2 Nguyên tắc thiết kế
@@ -209,7 +221,7 @@ Luồng dữ liệu chính:
 │  EC2 Worker (crawler-demo-worker-asg)                 │
 │  Container: crawler-worker (Docker)                   │
 │                                                       │
-│  1. APScheduler trigger (mỗi 1800s)                   │
+│  1. Kích hoạt cycle: APScheduler (interval) hoặc idle + crawl tay (web) │
 │  2. Fetch RSS/Sitemap → parse → normalize             │
 │  3. Serialize thành JSON list                         │
 │  4. len(payload) > 204800 bytes?                      │
@@ -258,8 +270,10 @@ Luồng dữ liệu chính:
 
 ### 3.2 Bước-by-bước chi tiết
 
-**Bước 1 — Scheduler trigger:**
-`run_forever()` trong container `crawler-worker` chạy **một cycle ngay khi boot** (không chờ interval đầu tiên), sau đó APScheduler tiếp tục mỗi `CRAWLER_INTERVAL_SECONDS=1800`. Biến này được inject qua environment variable trong systemd unit (Ansible template `crawler-worker.service.j2` hoặc `user_data.sh.tpl`).
+**Bước 1 — Kích hoạt cycle:**
+- **`CRAWLER_SCHEDULE_MODE=interval`:** `run_forever()` trong `crawler-worker` chạy **một cycle ngay khi boot**, sau đó APScheduler lặp mỗi `CRAWLER_INTERVAL_SECONDS` (mặc định 1800). Biến inject qua systemd (`crawler-worker.service.j2` hoặc `user_data.sh.tpl`).
+- **`CRAWLER_SCHEDULE_MODE=idle`:** container worker **không** gọi `run_once` theo lịch; vận hành viên hoặc UI gọi `POST /api/crawl` trên `crawler-web` để chạy `run_once` một lần (nền).
+- **`CRAWLER_SCHEDULE_MODE=once`:** một lần `run_once` rồi thoát.
 
 **Bước 2 — Fetch & Parse:**
 Worker fetch URL nguồn qua HTTP. Traffic đi qua NAT Gateway (single NAT, Scope 1). Parse RSS/Atom/Sitemap XML, extract fields: `source`, `canonical_url`, `title`, `summary`, `published_at`. Giới hạn `max_items_per_source=100`.
@@ -369,18 +383,15 @@ Scaling policies:
 ```
 
 **Hai container chạy trên mỗi instance:**
-1. `crawler-worker`: APScheduler crawl loop liên tục, chạy ngay khi boot, gửi SQS
-2. `crawler-web`: FastAPI dashboard, đọc RDS, expose port 8080
+1. `crawler-worker`: theo `CRAWLER_SCHEDULE_MODE` — định kỳ (`interval`), một lần rồi thoát (`once`), hoặc **idle** (không gọi `run_once` trong worker; dữ liệu chỉ vào SQS khi có cycle chạy từ `crawler-web` qua `POST /api/crawl`, hoặc sau khi đổi mode và restart service).
+2. `crawler-web`: FastAPI dashboard (psycopg3, `sslmode=require`), đọc RDS, expose port 8080; khi được cấp biến `CRAWLER_*` (SQS, S3 raw…) có thể **crawl tay** qua `POST /api/crawl` mà không cần worker tự schedule.
 
-**Vòng lặp crawl (`run_forever`):**
-```python
-# Chạy ngay một cycle khi boot — không chờ interval đầu tiên
-run_once()
-# Sau đó APScheduler tiếp tục mỗi interval_seconds
-while not stop_event["stop"]:
-    time.sleep(1)
-```
-`max_instances=1` + `coalesce=True` đảm bảo không bao giờ có 2 cycle chồng lấp trong cùng process.
+**Vòng đời crawl (`run_forever`) — tóm tắt:**
+- `interval`: khởi tạo APScheduler (`max_instances=1`, `coalesce=True`), `start()`, gọi `run_once()` ngay, rồi chờ tín hiệu dừng; scheduler chạy các cycle sau mỗi `interval_seconds`.
+- `once`: chỉ `run_once()` rồi return.
+- `idle`: không gọi `run_once`; vòng `while` chờ `SIGTERM`/`SIGINT` để thoát sạch.
+
+`max_instances=1` + `coalesce=True` (chế độ interval) đảm bảo không hai cycle chồng lấp **trong cùng process worker**; crawl tay trên web dùng lock riêng (`_crawl_lock`) để tránh hai `run_once` đồng thời trong process `crawler-web`.
 
 **Log forwarding:** `crawler-log-forward.service` (systemd) chạy script `crawler-forward-docker-logs.sh` — tail Docker logs → `/var/log/crawler.log` → CloudWatch Agent ship lên `/ec2/crawler-demo-worker`.
 
@@ -570,7 +581,7 @@ Với safety factor 0.7: **~78 connections khả dụng**.
 | Consumer | Connections | Ghi chú |
 |---|---|---|
 | Lambda (max 5 concurrent) | 5 × 1 = 5 | Mỗi Lambda giữ 1 conn (warm) |
-| Worker crawler-web | 1–5 | FastAPI connection pool |
+| Worker crawler-web | 1–5 | FastAPI dùng `psycopg.connect` theo từng request (không pool cố định); tải đồng thời thấp nên vài kết nối ngắn là đủ |
 | RDS Enhanced Monitoring | 1 | Internal |
 | Admin/psql | 1–2 | Dự phòng |
 | **Tổng** | **~15** | Rất an toàn với 78 khả dụng |
@@ -635,7 +646,7 @@ Internet → ALB (public subnets, sg_web_alb)
          → S3 exports bucket (list + presign download)
 ```
 
-**ALB được định nghĩa trực tiếp trong `environments/demo/main.tf`** (không phải submodule) vì nó phụ thuộc vào nhiều module outputs và là thành phần đặc thù của environment.
+**ALB được định nghĩa trực tiếp trong `environments/demo/main.tf`** (không phải submodule) vì nó phụ thuộc vào nhiều module outputs và là thành phần đặc thù của environment. Ứng dụng web dùng **psycopg** (Python) kết nối RDS với `sslmode=require`; Lambda ingester vẫn dùng **pg8000** như mô tả ở [§4.3](#43-lambda-ingester).
 
 **Security Group `sg_web_alb`:**
 - Ingress: TCP 80 từ `0.0.0.0/0`
@@ -664,15 +675,19 @@ ALB chỉ dùng `/health` (liveness) để tránh đánh dấu instance unhealth
 
 **API surface của FastAPI dashboard:**
 
-| Endpoint | Mô tả | Query params |
+| Endpoint | Mô tả | Query params / body |
 |---|---|---|
-| `GET /api/articles` | Danh sách bài, phân trang | `q`, `source`, `fetched_from/to`, `published_from/to`, `page`, `page_size`, `sort_by`, `sort_order` |
-| `GET /api/articles/{id}` | Chi tiết một bài | — |
-| `GET /api/stats` | KPIs: tổng bài, fetch 24h, last fetch, per-source counts | — |
-| `GET /api/sources` | Danh sách distinct source labels (cho dropdown filter) | — |
+| `GET /api/articles` | Danh sách bài, phân trang; mỗi item có thêm `display_title` (tiêu đề hiển thị khi `title` null — ví dụ từ URL/summary) | `q`, `source`, `fetched_from`, `fetched_to`, `published_from`, `published_to` (ngày `YYYY-MM-DD` theo UTC), `page`, `page_size`, `sort_by` (`fetched_at` \| `published_at`), `sort_order` |
+| `GET /api/articles/{id}` | Chi tiết một bài (cùng shape, gồm `display_title`) | — |
+| `GET /api/stats` | KPIs: tổng bài, fetch 24h, `last_fetched_at`, top 25 `sources` kèm count | — |
+| `GET /api/sources` | Distinct `source` (tối đa 500) cho dropdown filter | — |
+| `POST /api/crawl` | Kích hoạt **một** `run_once` trong nền (cùng pipeline SQS/Claim Check). Trả `409` nếu đang có job crawl | — |
+| `GET /api/crawl/status` | `{ busy, last_error }` — UI có thể poll sau khi bấm Crawl | — |
 | `GET /api/s3/exports` | List objects trong exports bucket | `prefix`, `max_keys`, `continuation_token` |
 | `GET /api/s3/exports/presign` | Presigned GET URL để tải file | `key`, `expires_seconds` (60–3600) |
-| `GET /` | Dashboard HTML (Jinja2 template) | — |
+| `GET /` | Dashboard HTML + static (`/static/...`) | — |
+
+**UI dashboard (SPA nhẹ trên `dashboard.js`):** lọc/tìm/sắp xếp/phân trang, KPI, modal chi tiết bài, tải export S3 qua presign, nút crawl + trạng thái, chuyển sáng/tối (lưu `localStorage`), copy URL.
 
 **S3 exports download flow:**
 ```
@@ -1118,7 +1133,7 @@ infrastructure/ansible/
 2. **ECR login:** `aws ecr get-login-password | docker login` (`no_log: true`)
 3. **Docker pull** với retry (3 lần, delay 10s)
 4. **Tạo file log** `/var/log/crawler.log` (nếu chưa có)
-5. **Deploy env file** `/etc/sysconfig/crawler-web` (mode 0600, `no_log: true`) — chứa DB password cho crawler-web container
+5. **Deploy env file** `/etc/sysconfig/crawler-web` (mode 0600, `no_log: true`) — DB + `WEB_S3_EXPORTS_BUCKET` + **biến `CRAWLER_*` (SQS, S3 raw, ngưỡng Claim Check, `MAX_ITEMS`)** để `POST /api/crawl` hoạt động giống worker
 6. **Deploy systemd units** từ Jinja2 templates:
    - `crawler-worker.service`
    - `crawler-web.service`
@@ -1203,13 +1218,16 @@ Restart=always
 RestartSec=10
 ExecStartPre=-/usr/bin/docker rm -f crawler-worker
 ExecStart=/usr/bin/docker run --rm --name crawler-worker \
-  -e CRAWLER_SCHEDULE_MODE=interval \
+  -e CRAWLER_SCHEDULE_MODE=idle \
   -e CRAWLER_INTERVAL_SECONDS=1800 \
   -e CRAWLER_SQS_QUEUE_URL=https://sqs.ap-southeast-1.amazonaws.com/... \
+  -e CRAWLER_S3_RAW_BUCKET=... \
   ...
   {ecr_repo}:{tag}
 ExecStop=/usr/bin/docker stop crawler-worker
 ```
+
+Đặt `CRAWLER_SCHEDULE_MODE=interval` nếu muốn crawl định kỳ trên worker; `idle` khi chỉ crawl qua dashboard.
 
 #### `crawler-web.service`
 
@@ -1217,12 +1235,12 @@ ExecStop=/usr/bin/docker stop crawler-worker
 [Service]
 ExecStart=/usr/bin/docker run --rm --name crawler-web \
   -p 8080:8080 \
-  --env-file /etc/sysconfig/crawler-web \   # DB password từ file 0600
+  --env-file /etc/sysconfig/crawler-web \   # DB + CRAWLER_* (SQS/S3) cho crawl tay
   {ecr_repo}:{tag} \
   uvicorn crawlerdemo.webapp:app --host 0.0.0.0 --port 8080 --app-dir src
 ```
 
-**Tại sao dùng `--env-file` thay vì `-e`?** Tránh DB password xuất hiện trong `ps aux` output và systemd journal. File `/etc/sysconfig/crawler-web` có mode 0600 (chỉ root đọc được).
+**Tại sao dùng `--env-file` thay vì `-e`?** Tránh DB password xuất hiện trong `ps aux` output và systemd journal. File `/etc/sysconfig/crawler-web` có mode 0600 (chỉ root đọc được). Template Jinja2 `crawler-web.env.j2` gom cả secret DB và biến AWS crawl (không nhất thiết secret) để một file phục vụ FastAPI đầy đủ chức năng.
 
 #### `crawler-log-forward.service`
 
@@ -1239,7 +1257,7 @@ Script `crawler-forward-docker-logs.sh` tail Docker logs của cả 2 container 
 | **Secrets** | Terraform vars (plaintext trong state) | Ansible Vault |
 | **Scope 1 strategy** | Bootstrap lần đầu | Re-configure sau đó |
 
-**Thực tế trong project:** `user_data.sh.tpl` bootstrap instance lần đầu (cài Docker, pull image, tạo systemd units). Ansible được dùng cho subsequent deployments và config changes mà không cần terminate instance.
+**Thực tế trong project:** `user_data.sh.tpl` bootstrap instance lần đầu (Docker, CWA, pull image, systemd cho `crawler-worker` với `CRAWLER_SCHEDULE_MODE=idle` và `crawler-web` kèm `CRAWLER_*` cho crawl tay). Ansible đồng bộ lại tag image, `crawler_schedule_mode`, file env web, và restart service — không cần terminate instance cho mỗi lần chỉnh cấu hình.
 
 
 ---
@@ -1441,7 +1459,7 @@ Usable connections = 112 × 0.75 = 84 connections
 | Consumer | Max connections | Ghi chú |
 |---|---|---|
 | Lambda (5 concurrent × 1 conn) | 5 | Warm start reuse, 1 conn/container |
-| crawler-web FastAPI | 5–10 | Connection pool |
+| crawler-web FastAPI | 2–8 | Kết nối ngắn theo request (psycopg), không pool cố định |
 | RDS Enhanced Monitoring | 1 | Internal |
 | Admin/psql sessions | 2–3 | Debug, migration |
 | **Tổng sử dụng** | **~18** | |
@@ -1484,7 +1502,7 @@ Per-record  = ~1ms (simple INSERT với index)
 Batch time  = 50ms cho 50 records (sequential trong 1 connection)
 ```
 
-**Bottleneck analysis:** Ở Scope 1, bottleneck là Worker crawl rate (1800s interval), không phải Lambda hay RDS. Hệ thống có thể xử lý hàng nghìn articles/giờ nếu cần.
+**Bottleneck analysis:** Ở Scope 1, bottleneck thường là tần suất crawl (interval 1800s **hoặc** số lần bấm crawl tay khi `schedule_mode=idle`), không phải Lambda hay RDS trong cấu hình mặc định. Hệ thống có thể xử lý hàng nghìn articles/giờ nếu tăng tần suất hoặc chuyển sang `interval` với chu kỳ ngắn hơn (đánh đổi tải nguồn và chi phí NAT).
 
 ### 9.4 Claim Check Threshold Rationale
 
@@ -2114,8 +2132,14 @@ curl -s "$ALB_DNS/health/ready"
 # → {"status":"ok"} hoặc HTTP 503 nếu DB down
 ```
 
-**Kiểm tra S3 exports API:**
+**Kiểm tra crawl tay & S3 exports API:**
 ```bash
+# Trạng thái crawl nền (sau khi POST /api/crawl)
+curl -s "$ALB_DNS/api/crawl/status" | python3 -m json.tool
+
+# Kích hoạt một vòng crawl (HTTP 409 nếu đang busy)
+curl -s -X POST "$ALB_DNS/api/crawl" | python3 -m json.tool
+
 # List exports
 curl -s "$ALB_DNS/api/s3/exports?prefix=auto/" | python3 -m json.tool
 
@@ -2185,6 +2209,7 @@ Metrics xuất hiện trong CloudWatch namespace `CWAgent` với dimension `Inst
 #### Smoke Tests
 - [ ] Dashboard accessible: `curl http://{alb_dns}/health` → `{"status":"ok"}` (liveness, không cần DB)
 - [ ] DB reachable: `curl http://{alb_dns}/health/ready` → `{"status":"ok"}` (readiness, check DB)
+- [ ] (Nếu dùng crawl tay) `POST /api/crawl` → `{"status":"started",...}` rồi `GET /api/crawl/status` → `busy` chuyển về false; kiểm tra SQS/Lambda/RDS có bản ghi mới
 - [ ] S3 exports list: `curl http://{alb_dns}/api/s3/exports` → JSON với `items` array
 - [ ] Lambda test invoke:
   ```bash
@@ -2340,8 +2365,9 @@ aws lambda update-function-configuration \
 |---|---|---|---|
 | `CRAWLER_SQS_QUEUE_URL` | crawler-worker | `module.queue.main_queue_url` | `sqs_queue_url` |
 | `CRAWLER_S3_RAW_BUCKET` | crawler-worker | `module.storage.s3_raw_bucket` | `s3_raw_bucket` |
-| `CRAWLER_INTERVAL_SECONDS` | crawler-worker | `var.crawler_interval_seconds` (1800) | — |
-| `CRAWLER_MAX_ITEMS_PER_SOURCE` | crawler-worker | hardcoded 100 | — |
+| `CRAWLER_SCHEDULE_MODE` | crawler-worker | `once` \| `interval` \| `idle` (Ansible `crawler_schedule_mode` / `user_data`) | — |
+| `CRAWLER_INTERVAL_SECONDS` | crawler-worker | `var.crawler_interval_seconds` (1800); chỉ có tác dụng khi `interval` | — |
+| `CRAWLER_MAX_ITEMS_PER_SOURCE` | crawler-worker | mặc định 100 (Ansible/terraform inject) | — |
 | `CRAWLER_CLAIM_CHECK_THRESHOLD_BYTES` | crawler-worker | hardcoded 204800 | — |
 | `CRAWLER_AWS_REGION` | crawler-worker | `var.aws_region` | — |
 | `WEB_DB_HOST` | crawler-web | `module.storage.rds_endpoint` | `rds_endpoint` |
@@ -2350,6 +2376,11 @@ aws lambda update-function-configuration \
 | `WEB_DB_USER` | crawler-web | `module.storage.db_username` (crawler) | `db_username` |
 | `WEB_DB_PASSWORD` | crawler-web | `var.db_password` (sensitive) | — |
 | `WEB_S3_EXPORTS_BUCKET` | crawler-web | `module.storage.s3_exports_bucket` | `s3_exports_bucket` |
+| `CRAWLER_SQS_QUEUE_URL` | crawler-web | cùng queue như worker | `sqs_queue_url` |
+| `CRAWLER_S3_RAW_BUCKET` | crawler-web | cùng bucket raw | `s3_raw_bucket` |
+| `CRAWLER_CLAIM_CHECK_THRESHOLD_BYTES` | crawler-web | đồng bộ worker | — |
+| `CRAWLER_MAX_ITEMS_PER_SOURCE` | crawler-web | đồng bộ worker | — |
+| `CRAWLER_AWS_REGION` / `AWS_DEFAULT_REGION` | crawler-web | Region | — |
 | `RDS_HOST` | Lambda | `module.storage.rds_endpoint` | `rds_endpoint` |
 | `DB_NAME` | Lambda | `module.storage.db_name` | `db_name` |
 | `DB_USER` | Lambda | `module.storage.db_username` | `db_username` |
@@ -2364,6 +2395,8 @@ aws lambda update-function-configuration \
 | 8080 | HTTP | ALB | Worker EC2 | FastAPI dashboard |
 | `/health` | HTTP | ALB | Worker :8080 | Liveness check (không check DB) |
 | `/health/ready` | HTTP | Monitor | Worker :8080 | Readiness check (check DB) |
+| `/api/crawl` | HTTP | Browser | Worker :8080 | POST — chạy một `run_once` (crawl tay) |
+| `/api/crawl/status` | HTTP | Browser | Worker :8080 | Trạng thái crawl nền |
 | `/api/s3/exports` | HTTP | Browser | Worker :8080 | List S3 exports |
 | `/api/s3/exports/presign` | HTTP | Browser | Worker :8080 | Presign URL tải file |
 | 5432 | TCP | Lambda ENI | RDS | Lambda → PostgreSQL |
@@ -2401,4 +2434,4 @@ aws lambda update-function-configuration \
 
 *Tài liệu này là nguồn sự thật duy nhất (single source of truth) cho kiến trúc hệ thống Web Crawler & Ingestion Pipeline. Mọi thay đổi kiến trúc phải được phản ánh trong tài liệu này.*
 
-*Cập nhật lần cuối: Phiên bản 1.0 — Scope 1 Production-Ready*
+*Cập nhật lần cuối: Phiên bản 1.2 — bổ sung `schedule_mode` (`idle`), crawl thủ công qua dashboard (`POST /api/crawl`), và mô tả UI/API hiện tại.*

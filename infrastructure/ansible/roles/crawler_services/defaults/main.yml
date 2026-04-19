@@ -1,3 +1,5 @@
 ---
 crawler_pull_retries: 5
 crawler_pull_retry_delay: 30
+# once | interval | idle — demo dùng idle + crawl tay qua dashboard
+crawler_schedule_mode: interval

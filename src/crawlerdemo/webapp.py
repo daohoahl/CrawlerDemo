@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,10 +11,11 @@ from typing import Literal
 from urllib.parse import urlparse
 
 import boto3
+from crawlerdemo.worker import run_once
 import psycopg
 from botocore.config import Config
 from botocore.exceptions import ClientError
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -50,6 +52,10 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 settings = WebSettings()
 
 logger = logging.getLogger("crawlerdemo.webapp")
+
+_crawl_lock = threading.Lock()
+_crawl_busy = False
+_crawl_last_error: str | None = None
 
 
 def _exports_bucket() -> str:
@@ -180,6 +186,46 @@ def health_ready() -> dict[str, str]:
         return {"status": "ok"}
     except Exception as exc:  # pragma: no cover
         raise HTTPException(status_code=503, detail=f"DB check failed: {exc}") from exc
+
+
+@app.get("/api/crawl/status")
+def crawl_status() -> dict[str, object]:
+    """Whether a manual crawl is running (started via POST /api/crawl)."""
+    with _crawl_lock:
+        return {"busy": _crawl_busy, "last_error": _crawl_last_error}
+
+
+@app.post("/api/crawl")
+def trigger_crawl(background_tasks: BackgroundTasks) -> dict[str, str]:
+    """
+    Run one full crawl pass (same as worker ``run_once``) in a background thread.
+    Requires the same CRAWLER_* env vars as the worker container (SQS, raw S3 bucket).
+    """
+    global _crawl_busy, _crawl_last_error
+
+    with _crawl_lock:
+        if _crawl_busy:
+            raise HTTPException(
+                status_code=409,
+                detail="Đang crawl — đợi xong rồi thử lại.",
+            )
+        _crawl_busy = True
+        _crawl_last_error = None
+
+    def _job() -> None:
+        global _crawl_busy, _crawl_last_error
+        try:
+            run_once()
+        except Exception as exc:  # pragma: no cover
+            logger.exception("manual crawl failed")
+            with _crawl_lock:
+                _crawl_last_error = str(exc)
+        finally:
+            with _crawl_lock:
+                _crawl_busy = False
+
+    background_tasks.add_task(_job)
+    return {"status": "started", "message": "Đã bắt đầu crawl (chạy nền)."}
 
 
 @app.get("/api/articles")

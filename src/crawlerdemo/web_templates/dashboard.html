@@ -59,7 +59,7 @@
         <section class="panel" id="s3-exports">
           <h2 class="section-title">Tải file export (S3)</h2>
           <p class="section-lede">
-            Sau mỗi lần ingest thành công, Lambda ghi file <strong>.jsonl</strong> (NDJSON, một bài một dòng) vào prefix <code>auto/YYYY/MM/DD/</code>. Để trống prefix bên dưới = xem cả bucket; nhập <code>auto/</code> để chỉ xem export tự động.
+            Sau mỗi lần ingest thành công, Lambda ghi file <strong>.json</strong> (UTF-8, thụt dòng, dễ đọc) vào prefix <code>auto/YYYY/MM/DD/</code>. Để trống prefix bên dưới = xem cả bucket; nhập <code>auto/</code> để chỉ xem export tự động.
             Raw HTML / claim-check lớn nằm bucket <strong>raw</strong>, khác bucket này. Nút <strong>Tải</strong> mở link ký sẵn (1 giờ).
           </p>
           <div class="toolbar-row" style="margin-bottom: 0.75rem">

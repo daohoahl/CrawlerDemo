@@ -1,6 +1,6 @@
 # Kiến Trúc Giải Pháp — Web Crawler & Ingestion Pipeline trên AWS
 
-> **Phiên bản:** 1.0 | **Môi trường:** `demo` | **Prefix tài nguyên:** `crawler-demo-*`
+> **Phiên bản:** 1.1 | **Môi trường:** `demo` | **Prefix tài nguyên:** `crawler-demo-*`
 > **Phạm vi:** Scope 1 — Production-ready, chi phí kiểm soát, quy mô nhỏ
 > **Ngôn ngữ IaC:** Terraform ≥ 1.5 | **Config Management:** Ansible | **Runtime:** Python 3.12
 
@@ -51,11 +51,16 @@ Hệ thống thu thập nội dung bài viết từ các nguồn web (RSS feed v
 
 ### 1.3 Cơ chế thu thập
 
-Worker chạy theo lịch `APScheduler` với chu kỳ `crawler_interval_seconds = 1800` (30 phút). Mỗi chu kỳ:
-1. Đọc danh sách nguồn từ cấu hình
+Worker chạy **liên tục** (`schedule_mode=interval`) theo vòng lặp APScheduler. Khi container khởi động, **một cycle được chạy ngay lập tức** (không chờ hết interval đầu tiên), sau đó lặp lại mỗi `crawler_interval_seconds = 1800` (30 phút). Mỗi chu kỳ:
+
+1. Đọc danh sách nguồn từ cấu hình (env vars `CRAWLER_RSS_URLS`, `CRAWLER_SITEMAP_URLS`)
 2. Fetch RSS/Sitemap, parse, chuẩn hóa thành danh sách article dict
 3. Nếu payload ≤ 200 KiB → gửi inline JSON array vào SQS
 4. Nếu payload > 200 KiB → upload lên S3 raw bucket, gửi Claim Check pointer vào SQS
+
+**Chế độ `schedule_mode=once`:** Chạy đúng một cycle rồi thoát — dùng cho EventBridge Scheduled Rule hoặc test thủ công.
+
+**Graceful shutdown:** Worker bắt `SIGTERM` / `SIGINT` (từ `docker stop` hoặc systemd), chờ APScheduler hoàn thành cycle hiện tại trước khi thoát (`scheduler.shutdown(wait=True)`).
 
 ### 1.4 Giới hạn kỹ thuật (Scope 1)
 
@@ -254,7 +259,7 @@ Luồng dữ liệu chính:
 ### 3.2 Bước-by-bước chi tiết
 
 **Bước 1 — Scheduler trigger:**
-APScheduler trong container `crawler-worker` kích hoạt mỗi `CRAWLER_INTERVAL_SECONDS=1800`. Biến này được inject qua environment variable trong systemd unit (Ansible template `crawler-worker.service.j2` hoặc `user_data.sh.tpl`).
+`run_forever()` trong container `crawler-worker` chạy **một cycle ngay khi boot** (không chờ interval đầu tiên), sau đó APScheduler tiếp tục mỗi `CRAWLER_INTERVAL_SECONDS=1800`. Biến này được inject qua environment variable trong systemd unit (Ansible template `crawler-worker.service.j2` hoặc `user_data.sh.tpl`).
 
 **Bước 2 — Fetch & Parse:**
 Worker fetch URL nguồn qua HTTP. Traffic đi qua NAT Gateway (single NAT, Scope 1). Parse RSS/Atom/Sitemap XML, extract fields: `source`, `canonical_url`, `title`, `summary`, `published_at`. Giới hạn `max_items_per_source=100`.
@@ -364,8 +369,18 @@ Scaling policies:
 ```
 
 **Hai container chạy trên mỗi instance:**
-1. `crawler-worker`: APScheduler crawl loop, gửi SQS
+1. `crawler-worker`: APScheduler crawl loop liên tục, chạy ngay khi boot, gửi SQS
 2. `crawler-web`: FastAPI dashboard, đọc RDS, expose port 8080
+
+**Vòng lặp crawl (`run_forever`):**
+```python
+# Chạy ngay một cycle khi boot — không chờ interval đầu tiên
+run_once()
+# Sau đó APScheduler tiếp tục mỗi interval_seconds
+while not stop_event["stop"]:
+    time.sleep(1)
+```
+`max_instances=1` + `coalesce=True` đảm bảo không bao giờ có 2 cycle chồng lấp trong cùng process.
 
 **Log forwarding:** `crawler-log-forward.service` (systemd) chạy script `crawler-forward-docker-logs.sh` — tail Docker logs → `/var/log/crawler.log` → CloudWatch Agent ship lên `/ec2/crawler-demo-worker`.
 
@@ -384,7 +399,8 @@ Scaling policies:
 #### Health check & Logging
 
 - **EC2 health check:** ASG dùng `health_check_type = "EC2"` — instance bị đánh dấu unhealthy nếu EC2 status check fail.
-- **ALB health check:** `GET /health` → HTTP 200, interval 30s, threshold 2/2.
+- **ALB liveness check:** `GET /health` → HTTP 200 (không check DB), interval 30s, threshold 2/2.
+- **ALB readiness check (monitoring):** `GET /health/ready` → `SELECT 1` trên RDS, trả về 503 nếu DB down.
 - **Log group:** `/ec2/crawler-demo-worker`, retention 30 ngày.
 - **Log streams:** `{instance_id}/user-data`, `{instance_id}/crawler`.
 
@@ -616,6 +632,7 @@ Internet → ALB (public subnets, sg_web_alb)
          → EC2 Worker instances :8080
          → FastAPI app (crawler-web container)
          → RDS PostgreSQL (read queries)
+         → S3 exports bucket (list + presign download)
 ```
 
 **ALB được định nghĩa trực tiếp trong `environments/demo/main.tf`** (không phải submodule) vì nó phụ thuộc vào nhiều module outputs và là thành phần đặc thù của environment.
@@ -636,7 +653,45 @@ resource "aws_security_group_rule" "worker_web_from_alb" {
 ```
 Rule này được thêm vào `sg_worker` từ environment level — không phải trong module security — để tránh circular dependency.
 
-**Health check:** `GET /health` → HTTP 200, interval 30s, timeout 5s, healthy threshold 2, unhealthy threshold 2.
+**Health check (2 tầng):**
+
+| Endpoint | Mục đích | DB check | Dùng bởi |
+|---|---|---|---|
+| `GET /health` | Liveness — container còn sống | ❌ Không | ALB Target Group |
+| `GET /health/ready` | Readiness — DB reachable | ✅ `SELECT 1` | Monitoring / alerting |
+
+ALB chỉ dùng `/health` (liveness) để tránh đánh dấu instance unhealthy khi DB tạm thời chậm. `/health/ready` dùng cho CloudWatch Synthetics hoặc external monitoring.
+
+**API surface của FastAPI dashboard:**
+
+| Endpoint | Mô tả | Query params |
+|---|---|---|
+| `GET /api/articles` | Danh sách bài, phân trang | `q`, `source`, `fetched_from/to`, `published_from/to`, `page`, `page_size`, `sort_by`, `sort_order` |
+| `GET /api/articles/{id}` | Chi tiết một bài | — |
+| `GET /api/stats` | KPIs: tổng bài, fetch 24h, last fetch, per-source counts | — |
+| `GET /api/sources` | Danh sách distinct source labels (cho dropdown filter) | — |
+| `GET /api/s3/exports` | List objects trong exports bucket | `prefix`, `max_keys`, `continuation_token` |
+| `GET /api/s3/exports/presign` | Presigned GET URL để tải file | `key`, `expires_seconds` (60–3600) |
+| `GET /` | Dashboard HTML (Jinja2 template) | — |
+
+**S3 exports download flow:**
+```
+User → GET /api/s3/exports?prefix=auto/
+     ← [{key, size, last_modified}, ...]
+
+User → GET /api/s3/exports/presign?key=auto/2026/04/19/batch.jsonl
+     ← {url: "https://s3.amazonaws.com/...?X-Amz-Signature=...", expires_in: "3600"}
+
+User → GET {presigned_url}  (trực tiếp đến S3, không qua server)
+     ← file content
+```
+
+Presigned URL dùng **Signature Version 4** (bắt buộc cho SSE-KMS buckets). Expiry mặc định 1 giờ, tối đa 1 giờ. File tải trực tiếp từ S3 — không đi qua EC2 worker, không tốn bandwidth của instance.
+
+**Security cho S3 list/presign:**
+- `_sanitize_s3_prefix()`: loại bỏ `..` trong prefix, giới hạn 500 ký tự
+- `_safe_s3_key()`: reject key có `..` hoặc bắt đầu bằng `/`, giới hạn 1024 ký tự
+- Worker IAM role có `s3:ListBucket` trên exports bucket và `s3:GetObject` trên objects
 
 **ASG attachment:**
 ```hcl
@@ -2039,7 +2094,37 @@ stats sum(inserted) as total_inserted, sum(skipped) as total_skipped
 | filter event = "batch_summary"
 ```
 
-### 13.6 Enhanced Monitoring
+### 13.6 Health Endpoints Monitoring
+
+| Endpoint | Kỳ vọng | Khi fail |
+|---|---|---|
+| `GET /health` | HTTP 200, `{"status":"ok"}` | Container crash → ALB đánh dấu unhealthy → ASG replace |
+| `GET /health/ready` | HTTP 200, `{"status":"ok"}` | HTTP 503 → DB down → alert qua external monitor |
+
+**Kiểm tra thủ công:**
+```bash
+ALB_DNS=$(terraform -chdir=infrastructure/terraform/environments/demo output -raw web_dashboard_url)
+
+# Liveness
+curl -s "$ALB_DNS/health"
+# → {"status":"ok"}
+
+# Readiness (DB check)
+curl -s "$ALB_DNS/health/ready"
+# → {"status":"ok"} hoặc HTTP 503 nếu DB down
+```
+
+**Kiểm tra S3 exports API:**
+```bash
+# List exports
+curl -s "$ALB_DNS/api/s3/exports?prefix=auto/" | python3 -m json.tool
+
+# Presign một file
+curl -s "$ALB_DNS/api/s3/exports/presign?key=auto/2026/04/19/batch.jsonl" | python3 -m json.tool
+# → {"url": "https://...", "expires_in": "3600", ...}
+```
+
+### 13.7 Enhanced Monitoring
 
 RDS Enhanced Monitoring (60s interval) cung cấp OS-level metrics:
 - `cpuUtilization.total`
@@ -2098,7 +2183,9 @@ Metrics xuất hiện trong CloudWatch namespace `CWAgent` với dimension `Inst
 ### 14.3 Sau khi Deploy (Post-deploy)
 
 #### Smoke Tests
-- [ ] Dashboard accessible: `curl http://{alb_dns}/health` → 200
+- [ ] Dashboard accessible: `curl http://{alb_dns}/health` → `{"status":"ok"}` (liveness, không cần DB)
+- [ ] DB reachable: `curl http://{alb_dns}/health/ready` → `{"status":"ok"}` (readiness, check DB)
+- [ ] S3 exports list: `curl http://{alb_dns}/api/s3/exports` → JSON với `items` array
 - [ ] Lambda test invoke:
   ```bash
   aws lambda invoke \
@@ -2271,10 +2358,14 @@ aws lambda update-function-configuration \
 
 ### 15.3 Port Map
 
-| Port | Protocol | From | To | Mục đích |
+| Port / Path | Protocol | From | To | Mục đích |
 |---|---|---|---|---|
 | 80 | HTTP | Internet | ALB | Dashboard access |
 | 8080 | HTTP | ALB | Worker EC2 | FastAPI dashboard |
+| `/health` | HTTP | ALB | Worker :8080 | Liveness check (không check DB) |
+| `/health/ready` | HTTP | Monitor | Worker :8080 | Readiness check (check DB) |
+| `/api/s3/exports` | HTTP | Browser | Worker :8080 | List S3 exports |
+| `/api/s3/exports/presign` | HTTP | Browser | Worker :8080 | Presign URL tải file |
 | 5432 | TCP | Lambda ENI | RDS | Lambda → PostgreSQL |
 | 5432 | TCP | Worker EC2 | RDS | crawler-web → PostgreSQL |
 | 443 | HTTPS | Worker EC2 | SQS/S3/ECR/SSM | AWS API calls (qua NAT) |

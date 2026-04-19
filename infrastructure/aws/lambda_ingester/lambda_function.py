@@ -141,9 +141,10 @@ def _safe_filename_part(message_id: str) -> str:
     return s[:80] if len(s) > 80 else s
 
 
-def _upload_export_jsonl(rows: list[dict], message_id: str) -> None:
+def _upload_export_json(rows: list[dict], message_id: str) -> None:
     """
-    Write one NDJSON file per SQS record when at least one row was inserted.
+    Write one pretty-printed JSON file per SQS record when at least one row
+    was inserted. Human-readable in browser/editor (not NDJSON).
     Failures are logged only — DB commit already succeeded.
     """
     bucket = _exports_bucket()
@@ -155,17 +156,23 @@ def _upload_export_jsonl(rows: list[dict], message_id: str) -> None:
     fname = (
         f"{now.strftime('%Y%m%dT%H%M%SZ')}_"
         f"{_safe_filename_part(message_id)}_"
-        f"{uuid.uuid4().hex[:8]}_{len(rows)}.jsonl"
+        f"{uuid.uuid4().hex[:8]}_{len(rows)}.json"
     )
     key = f"{_exports_prefix()}{date_path}/{fname}"
-    body = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
+    payload = {
+        "export_version": 1,
+        "exported_at": now.isoformat().replace("+00:00", "Z"),
+        "article_count": len(rows),
+        "articles": rows,
+    }
+    body = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
     try:
         _get_s3().put_object(
             Bucket=bucket,
             Key=key,
             Body=body.encode("utf-8"),
-            ContentType="application/x-ndjson",
+            ContentType="application/json; charset=utf-8",
         )
         logger.info(
             json.dumps(
@@ -173,7 +180,7 @@ def _upload_export_jsonl(rows: list[dict], message_id: str) -> None:
                     "event": "export_uploaded",
                     "bucket": bucket,
                     "key": key,
-                    "lines": len(rows),
+                    "articles": len(rows),
                 }
             )
         )
@@ -315,7 +322,7 @@ def lambda_handler(event, context):
             total_inserted += inserted_now
             total_skipped += skipped_now
 
-            _upload_export_jsonl(inserted_rows, message_id)
+            _upload_export_json(inserted_rows, message_id)
 
             logger.info(
                 json.dumps(

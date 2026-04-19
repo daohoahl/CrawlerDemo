@@ -79,6 +79,12 @@ data "aws_ami" "al2023" {
   }
 }
 
+# Fail fast if tfvars names a key pair that does not exist in this region/account.
+data "aws_key_pair" "worker" {
+  count    = var.ec2_key_name != null && var.ec2_key_name != "" ? 1 : 0
+  key_name = var.ec2_key_name
+}
+
 # ── User data: install Docker, pull image, run with systemd ──────────────────
 
 locals {
@@ -107,6 +113,8 @@ resource "aws_launch_template" "worker" {
   name_prefix   = "${local.name_prefix}-worker-"
   image_id      = data.aws_ami.al2023.id
   instance_type = var.instance_type
+
+  key_name = length(data.aws_key_pair.worker) > 0 ? data.aws_key_pair.worker[0].key_name : null
 
   iam_instance_profile {
     name = var.iam_instance_profile_name

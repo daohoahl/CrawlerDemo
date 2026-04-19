@@ -9,6 +9,21 @@ output "rds_endpoint" {
   sensitive   = true
 }
 
+output "rds_port" {
+  description = "RDS port (Ansible / clients)"
+  value       = module.storage.rds_port
+}
+
+output "db_name" {
+  description = "PostgreSQL database name"
+  value       = module.storage.db_name
+}
+
+output "db_username" {
+  description = "PostgreSQL master username"
+  value       = module.storage.db_username
+}
+
 output "s3_raw_bucket" {
   description = "S3 bucket used by the Claim-Check pattern (raw HTML offload)"
   value       = module.storage.s3_raw_bucket
@@ -39,9 +54,19 @@ output "ecr_repository_url" {
   value       = module.worker.ecr_repository_url
 }
 
+output "worker_cloudwatch_log_group_name" {
+  description = "CloudWatch Logs group for worker EC2 (Ansible / observability)"
+  value       = module.worker.log_group_name
+}
+
 output "worker_asg_name" {
   description = "Worker Auto Scaling Group name"
   value       = module.worker.asg_name
+}
+
+output "worker_launch_template_key_name" {
+  description = "Key pair on worker Launch Template — if set but EC2 instance shows no key, the instance was launched from an older LT; start an instance refresh or terminate the instance."
+  value       = module.worker.launch_template_key_name
 }
 
 output "nat_gateway_ip" {

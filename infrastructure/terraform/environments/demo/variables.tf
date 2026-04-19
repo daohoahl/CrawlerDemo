@@ -63,6 +63,13 @@ variable "ec2_instance_type" {
   }
 }
 
+variable "worker_ec2_key_name" {
+  description = "Optional EC2 Key Pair name in AWS for worker instances. Required for Ansible over SSH through Session Manager (see infrastructure/ansible). Leave null to omit SSH key on instances."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
 variable "crawler_interval_seconds" {
   description = "APScheduler interval between crawl cycles (inside the worker container)"
   type        = number

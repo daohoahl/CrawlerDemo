@@ -59,6 +59,17 @@ variable "db_password" {
   sensitive   = true
 }
 
+variable "s3_exports_bucket" {
+  description = "S3 bucket for JSONL auto-exports after ingest (ingester PutObject)"
+  type        = string
+}
+
+variable "s3_exports_prefix" {
+  description = "Key prefix for auto-export objects (e.g. auto/)"
+  type        = string
+  default     = "auto/"
+}
+
 # ── Lambda sizing ────────────────────────────────────────────────────────────
 variable "lambda_memory_mb" {
   description = "Lambda memory allocation"

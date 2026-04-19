@@ -29,5 +29,10 @@ data/
 .terraform.lock.hcl
 *.tfvars
 !*.tfvars.example
+
+# Ansible (inventory / vault cục bộ)
+infrastructure/ansible/inventory/demo.yml
+infrastructure/ansible/inventory/group_vars/crawler_demo/vault.yml
+infrastructure/ansible/.venv/
 **/build/
 **/lambda_function.zip

@@ -32,6 +32,13 @@ variable "iam_instance_profile_name" {
   type        = string
 }
 
+variable "ec2_key_name" {
+  description = "Optional EC2 Key Pair name (AWS) for SSH. Set to use Ansible over SSH + Session Manager (AWS-StartSSHSession) instead of the aws_ssm connection plugin."
+  type        = string
+  default     = null
+  nullable    = true
+}
+
 # ── Instance sizing ──────────────────────────────────────────────────────────
 variable "instance_type" {
   description = "EC2 instance type. Spec: t3.micro (Free Tier)."

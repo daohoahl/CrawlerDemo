@@ -13,6 +13,11 @@ output "launch_template_id" {
   value       = aws_launch_template.worker.id
 }
 
+output "launch_template_key_name" {
+  description = "Key pair name on the Launch Template (null if omitted). Running instances only show this key after they were launched from an LT version that includes it — replace instances if you added the key later."
+  value       = aws_launch_template.worker.key_name
+}
+
 output "ecr_repository_url" {
   description = "ECR repository URL (push worker images here)"
   value       = aws_ecr_repository.worker.repository_url

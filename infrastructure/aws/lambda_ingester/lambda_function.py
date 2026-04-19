@@ -22,6 +22,8 @@ Environment variables
 - ``DB_NAME``            database name
 - ``DB_USER``            username
 - ``DB_PASSWORD``        password (injected from Secrets Manager at deploy time)
+- ``S3_EXPORTS_BUCKET``  exports bucket name (JSONL auto-upload after successful inserts)
+- ``S3_EXPORTS_PREFIX``  key prefix, default ``auto/``
 - ``AWS_REGION``         provided automatically by the Lambda runtime
 - ``LOG_LEVEL``          optional, defaults to INFO
 """
@@ -31,7 +33,9 @@ import gzip
 import json
 import logging
 import os
+import re
 import ssl
+import uuid
 from datetime import datetime, timezone
 
 import boto3
@@ -121,6 +125,69 @@ def _get_s3():
     if _s3 is None:
         _s3 = boto3.client("s3")
     return _s3
+
+
+def _exports_bucket() -> str:
+    return os.environ.get("S3_EXPORTS_BUCKET", "").strip()
+
+
+def _exports_prefix() -> str:
+    p = os.environ.get("S3_EXPORTS_PREFIX", "auto/").strip()
+    return p if p.endswith("/") else (p + "/")
+
+
+def _safe_filename_part(message_id: str) -> str:
+    s = re.sub(r"[^0-9A-Za-z._-]+", "_", message_id or "msg")
+    return s[:80] if len(s) > 80 else s
+
+
+def _upload_export_jsonl(rows: list[dict], message_id: str) -> None:
+    """
+    Write one NDJSON file per SQS record when at least one row was inserted.
+    Failures are logged only — DB commit already succeeded.
+    """
+    bucket = _exports_bucket()
+    if not bucket or not rows:
+        return
+
+    now = datetime.now(timezone.utc)
+    date_path = now.strftime("%Y/%m/%d")
+    fname = (
+        f"{now.strftime('%Y%m%dT%H%M%SZ')}_"
+        f"{_safe_filename_part(message_id)}_"
+        f"{uuid.uuid4().hex[:8]}_{len(rows)}.jsonl"
+    )
+    key = f"{_exports_prefix()}{date_path}/{fname}"
+    body = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n"
+
+    try:
+        _get_s3().put_object(
+            Bucket=bucket,
+            Key=key,
+            Body=body.encode("utf-8"),
+            ContentType="application/x-ndjson",
+        )
+        logger.info(
+            json.dumps(
+                {
+                    "event": "export_uploaded",
+                    "bucket": bucket,
+                    "key": key,
+                    "lines": len(rows),
+                }
+            )
+        )
+    except Exception as exc:
+        logger.error(
+            json.dumps(
+                {
+                    "event": "export_upload_failed",
+                    "bucket": bucket,
+                    "key": key,
+                    "error": str(exc),
+                }
+            )
+        )
 
 
 # ── SQL ──────────────────────────────────────────────────────────────────────
@@ -214,6 +281,7 @@ def lambda_handler(event, context):
             fetched_at = datetime.now(timezone.utc).isoformat()
             inserted_now = 0
             skipped_now = 0
+            inserted_rows: list[dict] = []
 
             with conn.cursor() as cursor:
                 for item in payload_list:
@@ -230,12 +298,24 @@ def lambda_handler(event, context):
                     )
                     if cursor.rowcount == 1:
                         inserted_now += 1
+                        inserted_rows.append(
+                            {
+                                "source": item.get("source"),
+                                "canonical_url": item.get("canonical_url"),
+                                "title": item.get("title"),
+                                "summary": item.get("summary"),
+                                "published_at": item.get("published_at"),
+                                "fetched_at": fetched_at,
+                            }
+                        )
                     else:
                         skipped_now += 1
 
             conn.commit()
             total_inserted += inserted_now
             total_skipped += skipped_now
+
+            _upload_export_jsonl(inserted_rows, message_id)
 
             logger.info(
                 json.dumps(

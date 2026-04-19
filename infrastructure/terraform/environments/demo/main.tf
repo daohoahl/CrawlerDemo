@@ -179,6 +179,9 @@ module "lambda" {
   lambda_source_file = local.lambda_source_file
   lambda_layer_zip   = local.lambda_layer_zip
 
+  s3_exports_bucket = module.storage.s3_exports_bucket
+  s3_exports_prefix = "auto/"
+
   common_tags = local.common_tags
   depends_on  = [module.storage, module.queue, module.security]
 }
@@ -197,6 +200,7 @@ module "worker" {
   private_subnet_ids        = module.networking.private_subnet_ids
   sg_worker_id              = module.security.sg_worker_id
   iam_instance_profile_name = module.security.worker_instance_profile_name
+  ec2_key_name              = var.worker_ec2_key_name
 
   instance_type    = var.ec2_instance_type
   desired_capacity = 1 # spec

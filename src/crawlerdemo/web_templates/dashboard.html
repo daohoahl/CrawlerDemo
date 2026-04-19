@@ -42,7 +42,11 @@
         <header class="page-head">
           <div>
             <h1>Bài đã crawl</h1>
-            <p class="lede">Tìm kiếm và lọc theo nguồn, ngày fetch/publish. Crawl chạy tự động trên worker — không cần thao tác thêm.</p>
+            <p class="lede">
+              Tìm kiếm và lọc theo nguồn, ngày fetch/publish. Crawl chạy tự động trên worker — không cần thao tác thêm.
+              Cột <strong>Fetch</strong> trong ~24 giờ gần đây hiển thị dạng tương đối (vd. «4 giờ» = bài được fetch cách đây 4 giờ), không phải chỉ lọc 4 giờ.
+              Tổng số bài trong DB xem ô <strong>Tổng bài</strong>; bảng bên dưới là phân trang (vd. 20/trang).
+            </p>
           </div>
         </header>
 
@@ -55,12 +59,13 @@
         <section class="panel" id="s3-exports">
           <h2 class="section-title">Tải file export (S3)</h2>
           <p class="section-lede">
-            Danh sách file trong bucket export (CSV/JSON). Nút <strong>Tải</strong> mở link ký sẵn, hiệu lực <strong>1 giờ</strong>.
+            Sau mỗi lần ingest thành công, Lambda ghi file <strong>.jsonl</strong> (NDJSON, một bài một dòng) vào prefix <code>auto/YYYY/MM/DD/</code>. Để trống prefix bên dưới = xem cả bucket; nhập <code>auto/</code> để chỉ xem export tự động.
+            Raw HTML / claim-check lớn nằm bucket <strong>raw</strong>, khác bucket này. Nút <strong>Tải</strong> mở link ký sẵn (1 giờ).
           </p>
           <div class="toolbar-row" style="margin-bottom: 0.75rem">
             <label class="field grow">
               <span class="field-label">Prefix (thư mục)</span>
-              <input id="s3Prefix" type="text" placeholder="Để trống = gốc bucket" autocomplete="off" />
+              <input id="s3Prefix" type="text" placeholder="auto/ hoặc để trống" autocomplete="off" />
             </label>
             <button type="button" class="btn btn-primary" id="s3RefreshBtn">Làm mới</button>
           </div>

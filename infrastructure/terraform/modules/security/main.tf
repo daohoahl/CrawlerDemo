@@ -215,15 +215,28 @@ resource "aws_iam_role_policy" "lambda_custom" {
         Resource = "arn:aws:s3:::${local.name_prefix}-raw-*/*"
       },
       {
+        Sid    = "S3ExportsWriteAuto"
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:AbortMultipartUpload",
+        ]
+        Resource = "arn:aws:s3:::${local.name_prefix}-exports-*/*"
+      },
+      {
         Sid      = "SecretsManagerRead"
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
         Resource = "arn:aws:secretsmanager:${var.aws_region}:${var.aws_account_id}:secret:${local.name_prefix}/*"
       },
       {
-        Sid      = "KMSDecrypt"
-        Effect   = "Allow"
-        Action   = ["kms:Decrypt", "kms:GenerateDataKey"]
+        Sid    = "KMSForS3AndSecrets"
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:Encrypt",
+          "kms:GenerateDataKey",
+        ]
         Resource = aws_kms_key.main.arn
       },
     ]

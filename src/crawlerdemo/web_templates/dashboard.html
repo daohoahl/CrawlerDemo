@@ -64,7 +64,7 @@
           <h2 class="section-title">Tải file export (S3)</h2>
           <p class="section-lede">
             Sau mỗi lần ingest thành công, Lambda ghi file <strong>.json</strong> (UTF-8, thụt dòng, dễ đọc) vào prefix <code>auto/YYYY/MM/DD/</code>. Để trống prefix bên dưới = xem cả bucket; nhập <code>auto/</code> để chỉ xem export tự động.
-            Raw HTML / claim-check lớn nằm bucket <strong>raw</strong>, khác bucket này. Nút <strong>Tải</strong> mở link ký sẵn (1 giờ).
+            Raw HTML / claim-check lớn nằm bucket <strong>raw</strong>, khác bucket này. Mỗi lần bấm <strong>Tải</strong> backend tạo presigned URL mới (thường ~1 giờ cho <em>đúng request đó</em>); lưu tab/bookmark URL cũ thì sau đó sẽ lỗi.
           </p>
           <div class="toolbar-row" style="margin-bottom: 0.75rem">
             <label class="field grow">

@@ -436,7 +436,7 @@ async function loadS3Exports(append) {
 
   s3NextToken = data.next_continuation_token || null;
   s3MoreBtn.hidden = !data.is_truncated || !s3NextToken;
-  s3summary.textContent = `Bucket: ${esc(data.bucket || "")} · ${(data.items || []).length} object (link tải hiệu lực 1 giờ)`;
+  s3summary.textContent = `Bucket: ${esc(data.bucket || "")} · ${(data.items || []).length} object — mỗi lần bấm Tải tạo link mới (~1 giờ; copy URL cũ ra ngoài thì sau đó hết hạn)`;
 }
 
 s3RefreshBtn.addEventListener("click", () => loadS3Exports(false));

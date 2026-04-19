@@ -58,7 +58,9 @@ def _exports_bucket() -> str:
 
 def _s3_client():
     region = os.getenv("AWS_DEFAULT_REGION") or os.getenv("AWS_REGION") or "ap-southeast-1"
+    # SSE-KMS buckets reject presigned URLs unless they use Signature Version 4.
     cfg = Config(
+        signature_version="s3v4",
         connect_timeout=5,
         read_timeout=30,
         retries={"max_attempts": 3, "mode": "standard"},

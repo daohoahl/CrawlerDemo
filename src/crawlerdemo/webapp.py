@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -51,9 +50,6 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 settings = WebSettings()
 
 logger = logging.getLogger("crawlerdemo.webapp")
-
-_crawl_lock = threading.Lock()
-_manual_crawl_running = False
 
 
 def _exports_bucket() -> str:
@@ -319,10 +315,7 @@ def s3_list_exports(
     max_keys: int = Query(default=50, ge=1, le=200),
     continuation_token: str | None = Query(default=None),
 ) -> dict[str, object]:
-    """
-    List objects in the configured exports bucket (CSV/JSON exports).
-    Requires IAM on the EC2 instance profile: s3:ListBucket, s3:GetObject.
-    """
+    """List objects in the exports bucket (CSV/JSON). Requires ListBucket on the instance role."""
     bucket = _exports_bucket()
     if not bucket:
         raise HTTPException(
@@ -367,9 +360,9 @@ def s3_list_exports(
 @app.get("/api/s3/exports/presign")
 def s3_presign_export(
     key: str = Query(..., min_length=1, max_length=1024),
-    expires_seconds: int = Query(default=900, ge=60, le=3600),
+    expires_seconds: int = Query(default=3600, ge=60, le=3600),
 ) -> dict[str, str]:
-    """Return a time-limited HTTPS URL to download one object (browser or curl)."""
+    """Presigned GET URL; default expiry 1 hour (max 1 hour)."""
     bucket = _exports_bucket()
     if not bucket:
         raise HTTPException(status_code=503, detail="WEB_S3_EXPORTS_BUCKET is not set.")
@@ -401,54 +394,6 @@ def api_sources() -> dict[str, object]:
         raise HTTPException(status_code=500, detail=f"Sources query failed: {exc}") from exc
 
     return {"items": names}
-
-
-@app.post("/api/crawl/now")
-def crawl_now() -> dict[str, str]:
-    """
-    Chạy một vòng crawl ngay (cùng logic worker: RSS + sitemap → SQS).
-    Chạy trong thread nền; song song với worker lịch trình có thể trùng — ingest idempotent.
-    """
-    global _manual_crawl_running
-    if not os.getenv("CRAWLER_SQS_QUEUE_URL", "").strip():
-        raise HTTPException(
-            status_code=503,
-            detail="CRAWLER_SQS_QUEUE_URL chưa cấu hình trên web container.",
-        )
-    with _crawl_lock:
-        if _manual_crawl_running:
-            raise HTTPException(
-                status_code=409,
-                detail="Đã có một lần crawl thủ công đang chạy — đợi xong rồi thử lại.",
-            )
-        _manual_crawl_running = True
-
-    def _run() -> None:
-        global _manual_crawl_running
-        try:
-            from crawlerdemo.worker import run_once
-
-            logger.info("manual_crawl.start")
-            run_once()
-            logger.info("manual_crawl.done")
-        except Exception:
-            logger.exception("manual_crawl.failed")
-        finally:
-            with _crawl_lock:
-                _manual_crawl_running = False
-
-    threading.Thread(target=_run, daemon=True).start()
-    return {
-        "status": "started",
-        "message": "Đã bắt đầu một vòng crawl (đủ nguồn RSS + sitemap) trên nền.",
-    }
-
-
-@app.get("/api/crawl/status")
-def crawl_status() -> dict[str, bool]:
-    """Trạng thái crawl thủ công (không biết worker lịch trình)."""
-    with _crawl_lock:
-        return {"manual_running": _manual_crawl_running}
 
 
 @app.get("/", response_class=HTMLResponse)

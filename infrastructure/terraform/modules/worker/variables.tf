@@ -70,7 +70,7 @@ variable "s3_raw_bucket" {
 }
 
 variable "s3_exports_bucket" {
-  description = "S3 bucket name for CSV/JSON exports (web dashboard listing + download)"
+  description = "S3 bucket for CSV/JSON exports (dashboard presigned download)"
   type        = string
 }
 

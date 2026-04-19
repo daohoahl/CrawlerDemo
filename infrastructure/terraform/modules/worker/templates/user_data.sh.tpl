@@ -134,12 +134,6 @@ ExecStart=/usr/bin/docker run --rm --name crawler-web \
   -e WEB_DB_PASSWORD=__WEB_DB_PASSWORD__ \
   -e WEB_S3_EXPORTS_BUCKET=__S3_EXPORTS_BUCKET__ \
   -e AWS_DEFAULT_REGION=__REGION__ \
-  -e CRAWLER_AWS_REGION=__REGION__ \
-  -e CRAWLER_SQS_QUEUE_URL=__SQS_URL__ \
-  -e CRAWLER_S3_RAW_BUCKET=__S3_BUCKET__ \
-  -e CRAWLER_CLAIM_CHECK_THRESHOLD_BYTES=__CLAIM_CHECK_BYTES__ \
-  -e CRAWLER_MAX_ITEMS_PER_SOURCE=__MAX_ITEMS__ \
-  -e CRAWLER_LOG_LEVEL=INFO \
   __IMAGE__ \
   uvicorn crawlerdemo.webapp:app --host 0.0.0.0 --port __WEB_PORT__ --app-dir src
 
@@ -157,10 +151,7 @@ sed -i \
   -e "s#__WEB_DB_USER__#${web_db_user}#g" \
   -e "s#__WEB_DB_PASSWORD__#${web_db_password}#g" \
   -e "s#__S3_EXPORTS_BUCKET__#${s3_exports_bucket}#g" \
-  -e "s#__SQS_URL__#${sqs_queue_url}#g" \
-  -e "s#__S3_BUCKET__#${s3_raw_bucket}#g" \
-  -e "s#__CLAIM_CHECK_BYTES__#${claim_check_threshold_bytes}#g" \
-  -e "s#__MAX_ITEMS__#${max_items_per_source}#g" \
+  -e "s#__REGION__#${aws_region}#g" \
   -e "s#__IMAGE__#$REPO_URL:$IMAGE_TAG#g" \
   /etc/systemd/system/crawler-web.service
 

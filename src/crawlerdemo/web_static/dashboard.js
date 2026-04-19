@@ -353,6 +353,63 @@ const s3MoreBtn = document.getElementById("s3MoreBtn");
 const s3summary = document.getElementById("s3summary");
 let s3NextToken = null;
 
+/** sessionStorage: sau khi bấm Tải, ~1 giờ ẩn nút Tải (presigned hết hạn theo quy ước UI). */
+const S3_PRESIGN_AT_PREFIX = "crawler_s3_presign_at_";
+const S3_PRESIGN_TTL_MS = 3600 * 1000;
+
+function s3PresignStorageKey(objectKey) {
+  return S3_PRESIGN_AT_PREFIX + objectKey;
+}
+
+function s3PresignCooldownLeftMs(objectKey) {
+  try {
+    const raw = sessionStorage.getItem(s3PresignStorageKey(objectKey));
+    if (!raw) return 0;
+    const at = Number(raw);
+    if (Number.isNaN(at)) return 0;
+    const left = S3_PRESIGN_TTL_MS - (Date.now() - at);
+    return left > 0 ? left : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function formatPresignCooldownShort(ms) {
+  const m = Math.ceil(ms / 60000);
+  return m < 1 ? "<1 phút" : `~${m} phút`;
+}
+
+function renderS3ActionCell(objectKey) {
+  const left = s3PresignCooldownLeftMs(objectKey);
+  if (left > 0) {
+    return `<span class="muted" title="Link presigned thường ~1 giờ; sau đó bấm Lấy link mới.">Đã tạo (${formatPresignCooldownShort(left)})</span> <button type="button" class="btn btn-ghost btn-sm" data-s3-renew="${esc(objectKey)}">Lấy link mới</button>`;
+  }
+  return `<button type="button" class="btn btn-ghost btn-sm" data-s3-dl="${esc(objectKey)}">Tải</button>`;
+}
+
+async function openS3Presign(objectKey) {
+  const pr = await fetch(
+    `/api/s3/exports/presign?key=${encodeURIComponent(objectKey)}&expires_seconds=3600`,
+    { headers: { Accept: "application/json" } },
+  );
+  const { text: pt, data: pd, jsonOk: pj } = await parseFetchBody(pr);
+  if (!pj) {
+    showToast(httpNonJsonMessage(pr.status, pt));
+    return;
+  }
+  if (!pr.ok) {
+    showToast(typeof pd.detail === "string" ? pd.detail : "Presign failed");
+    return;
+  }
+  window.open(pd.url, "_blank", "noopener,noreferrer");
+  try {
+    sessionStorage.setItem(s3PresignStorageKey(objectKey), String(Date.now()));
+  } catch {
+    /* quota / private mode */
+  }
+  loadS3Exports(false);
+}
+
 function formatBytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -401,7 +458,7 @@ async function loadS3Exports(append) {
       <td class="s3-key"><code>${esc(key)}</code></td>
       <td class="col-s3-size">${formatBytes(obj.size || 0)}</td>
       <td class="col-dt">${lm}</td>
-      <td class="col-actions"><button type="button" class="btn btn-ghost btn-sm" data-s3-dl="${esc(key)}">Tải</button></td>
+      <td class="col-actions">${renderS3ActionCell(key)}</td>
     </tr>`;
   });
   if (!append && !rows.length) {
@@ -410,34 +467,35 @@ async function loadS3Exports(append) {
     s3tbody.insertAdjacentHTML("beforeend", rows.join(""));
   }
 
-  s3tbody.querySelectorAll("button[data-s3-dl]").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const key = btn.getAttribute("data-s3-dl");
-      try {
-        const pr = await fetch(
-          `/api/s3/exports/presign?key=${encodeURIComponent(key)}&expires_seconds=3600`,
-          { headers: { Accept: "application/json" } },
-        );
-        const { text: pt, data: pd, jsonOk: pj } = await parseFetchBody(pr);
-        if (!pj) {
-          showToast(httpNonJsonMessage(pr.status, pt));
-          return;
-        }
-        if (!pr.ok) {
-          showToast(typeof pd.detail === "string" ? pd.detail : "Presign failed");
-          return;
-        }
-        window.open(pd.url, "_blank", "noopener,noreferrer");
-      } catch (e) {
-        showToast(String(e));
-      }
-    });
-  });
-
   s3NextToken = data.next_continuation_token || null;
   s3MoreBtn.hidden = !data.is_truncated || !s3NextToken;
-  s3summary.textContent = `Bucket: ${esc(data.bucket || "")} · ${(data.items || []).length} object — mỗi lần bấm Tải tạo link mới (~1 giờ; copy URL cũ ra ngoài thì sau đó hết hạn)`;
+  s3summary.textContent = `Bucket: ${esc(data.bucket || "")} · ${(data.items || []).length} object — sau khi bấm Tải, ~1 giờ không hiện lại Tải (dùng Lấy link mới nếu cần)`;
 }
+
+s3tbody.addEventListener("click", async (ev) => {
+  const renew = ev.target.closest("[data-s3-renew]");
+  if (renew) {
+    const key = renew.getAttribute("data-s3-renew");
+    if (key) {
+      try {
+        sessionStorage.removeItem(s3PresignStorageKey(key));
+      } catch {
+        /* ignore */
+      }
+      loadS3Exports(false);
+    }
+    return;
+  }
+  const dl = ev.target.closest("[data-s3-dl]");
+  if (!dl) return;
+  const key = dl.getAttribute("data-s3-dl");
+  if (!key) return;
+  try {
+    await openS3Presign(key);
+  } catch (e) {
+    showToast(String(e));
+  }
+});
 
 s3RefreshBtn.addEventListener("click", () => loadS3Exports(false));
 s3MoreBtn.addEventListener("click", () => loadS3Exports(true));
@@ -446,6 +504,16 @@ s3PrefixEl.addEventListener("change", () => loadS3Exports(false));
 function setCrawlUi(busy, message) {
   if (crawlNowBtn) crawlNowBtn.disabled = !!busy;
   if (crawlStatusEl) crawlStatusEl.textContent = message || "";
+}
+
+/** Sau khi worker gửi SQS, Lambda ghi DB lệch vài giây — làm mới thêm vài lần. */
+async function refreshAfterIngestDelays() {
+  const delays = [4000, 10000, 20000];
+  for (const ms of delays) {
+    await new Promise((r) => setTimeout(r, ms));
+    await loadStats();
+    await loadData();
+  }
 }
 
 async function pollCrawlUntilDone() {
@@ -468,14 +536,18 @@ async function pollCrawlUntilDone() {
         showToast(`Crawl lỗi: ${data.last_error}`);
         setCrawlUi(false, "");
       } else {
-        showToast("Crawl xong — đang làm mới danh sách.");
-        setCrawlUi(false, "");
+        setCrawlUi(false, "Đã gửi queue — đợi Lambda ghi DB…");
         await loadStats();
         await loadData();
+        await refreshAfterIngestDelays();
+        setCrawlUi(false, "");
+        showToast(
+          "Đã làm mới bảng. Không thấy bài mới? Thường do URL trùng (đã có trong DB) hoặc nguồn không có tin mới.",
+        );
       }
       return;
     }
-    setCrawlUi(true, "Đang crawl…");
+    setCrawlUi(true, "Đang crawl (gửi nguồn → SQS)…");
   }
   setCrawlUi(false, "Hết thời gian chờ (thử làm mới trang).");
 }

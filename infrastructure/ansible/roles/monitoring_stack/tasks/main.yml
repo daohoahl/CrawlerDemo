@@ -1,9 +1,35 @@
 ---
-- name: Cài plugin docker compose
-  ansible.builtin.raw: /usr/bin/dnf install -y docker-compose-plugin
-  register: _dnf_docker_compose
-  changed_when: true
-  failed_when: (_dnf_docker_compose.rc | default(-1)) != 0
+# Amazon Linux 2023: gói docker-compose-plugin đôi khi không có trong repo mặc định.
+# Thử dnf trước; nếu không được thì cài CLI plugin vào /usr/local/lib/docker/cli-plugins/ (theo Docker docs).
+- name: Đảm bảo Docker Compose v2 (dnf hoặc binary)
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+      exit 0
+    fi
+    if /usr/bin/dnf install -y docker-compose-plugin 2>/dev/null; then
+      docker compose version
+      exit 0
+    fi
+    mkdir -p /usr/local/lib/docker/cli-plugins
+    ARCH="$(uname -m)"
+    case "$ARCH" in
+      x86_64) DARCH="linux-x86_64" ;;
+      aarch64) DARCH="linux-aarch64" ;;
+      *) echo "unsupported arch: $ARCH" >&2; exit 1 ;;
+    esac
+    curl -fsSL "https://github.com/docker/compose/releases/download/v{{ monitoring_docker_compose_plugin_version }}/docker-compose-${DARCH}" \
+      -o /usr/local/lib/docker/cli-plugins/docker-compose
+    chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+    docker compose version
+  register: _docker_compose_install
+  changed_when: >-
+    _docker_compose_install.rc == 0 and (
+    'Complete!' in (_docker_compose_install.stdout | default('')) or
+    'Installed' in (_docker_compose_install.stdout | default('')) or
+    'Docker Compose version' in (_docker_compose_install.stdout | default(''))
+    )
+  failed_when: (_docker_compose_install.rc | default(-1)) != 0
 
 - name: Tạo thư mục monitoring stack
   ansible.builtin.file:

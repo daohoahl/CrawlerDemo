@@ -12,3 +12,6 @@ monitoring_grafana_default_timezone: browser
 
 monitoring_webapp_metrics_host: host.docker.internal
 monitoring_webapp_metrics_port: "{{ crawler_web_port | default(8080) }}"
+
+# Compose v2 CLI plugin — fallback tải binary nếu repo AL2023 không có docker-compose-plugin
+monitoring_docker_compose_plugin_version: "2.27.0"

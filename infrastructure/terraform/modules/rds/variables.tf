@@ -8,21 +8,6 @@ variable "environment" {
   type        = string
 }
 
-variable "aws_region" {
-  description = "AWS Region"
-  type        = string
-}
-
-variable "aws_account_id" {
-  description = "AWS Account ID (used to build globally-unique S3 bucket names)"
-  type        = string
-}
-
-variable "vpc_id" {
-  description = "VPC ID"
-  type        = string
-}
-
 variable "db_subnet_ids" {
   description = "Subnet IDs for the RDS subnet group (DB tier)"
   type        = list(string)
@@ -34,13 +19,12 @@ variable "sg_rds_id" {
 }
 
 variable "kms_key_arn" {
-  description = "KMS Key ARN used to encrypt RDS + S3"
+  description = "KMS Key ARN used to encrypt RDS"
   type        = string
 }
 
-# ── RDS ──────────────────────────────────────────────────────────────────────
 variable "db_instance_class" {
-  description = "RDS instance class. Scope 1 target: db.t3.micro (Free Tier)."
+  description = "RDS instance class"
   type        = string
   default     = "db.t3.micro"
 }
@@ -58,13 +42,13 @@ variable "db_max_allocated_storage" {
 }
 
 variable "db_multi_az" {
-  description = "Enable Multi-AZ for RDS. Scope 1 = false."
+  description = "Enable Multi-AZ for RDS"
   type        = bool
   default     = false
 }
 
 variable "db_backup_retention_days" {
-  description = "Automated backup retention days (Free Tier commonly allows up to 1)"
+  description = "Automated backup retention days"
   type        = number
   default     = 1
 }
@@ -91,13 +75,6 @@ variable "db_password" {
   description = "Master DB password"
   type        = string
   sensitive   = true
-}
-
-# ── S3 ───────────────────────────────────────────────────────────────────────
-variable "raw_expiration_days" {
-  description = "Lifecycle: expire raw HTML payloads after N days"
-  type        = number
-  default     = 30
 }
 
 variable "common_tags" {

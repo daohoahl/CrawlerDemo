@@ -100,3 +100,40 @@ variable "alert_email" {
   description = "Email for SNS alarm notifications"
   type        = string
 }
+
+# ── Local automation outputs (runtime files for GH Actions / Ansible) ──────
+variable "generate_runtime_files" {
+  description = "Generate .runtime.env and ansible inventory.ini during terraform apply"
+  type        = bool
+  default     = true
+}
+
+variable "ansible_user" {
+  description = "SSH user for Ansible inventory.ini"
+  type        = string
+  default     = "ec2-user"
+}
+
+variable "ansible_ssh_private_key_file" {
+  description = "PEM file path used by Ansible inventory.ini"
+  type        = string
+  default     = "~/.ssh/crawler-worker.pem"
+}
+
+variable "ansible_bastion_user" {
+  description = "Bastion SSH user used by ProxyJump (if bastion host is set)"
+  type        = string
+  default     = "ec2-user"
+}
+
+variable "ansible_bastion_host" {
+  description = "Optional bastion host/IP used by ProxyJump; empty disables ProxyJump"
+  type        = string
+  default     = ""
+}
+
+variable "ansible_worker_host" {
+  description = "Worker private IP/hostname for generated Ansible inventory.ini"
+  type        = string
+  default     = "10.0.12.10"
+}

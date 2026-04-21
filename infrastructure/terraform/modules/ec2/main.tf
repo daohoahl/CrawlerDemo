@@ -1,24 +1,10 @@
 # =============================================================================
-# MODULE: worker
-#
-# Creates:
-#   - ECR repository (holds the worker Docker image)
-#   - Launch Template for EC2 t3.micro running the container via Docker
-#   - Auto Scaling Group spanning Multi-AZ private subnets
-#   - CloudWatch CPU-based scaling policies
-#   - CloudWatch Log Group for systemd/container logs
-#
-# Spec alignment (Scope 1):
-#   - Instance type t3.micro (Free Tier)
-#   - ASG: desired=1, min=1, max=2  (HA with cost control)
-#   - Multi-AZ (>= 2 AZs — enforced by networking module)
-#   - Scale out: CPUUtilization > 70 % for 3 minutes (3 × 60 s periods)
-#   - Scale in : CPUUtilization < 40 % for 3 minutes
+# MODULE: ec2
 # =============================================================================
 
 locals {
   name_prefix = "${var.project}-${var.environment}"
-  tags        = merge(var.common_tags, { Module = "worker" })
+  tags        = merge(var.common_tags, { Module = "ec2" })
 }
 
 # ── ECR Repository (worker image) ────────────────────────────────────────────

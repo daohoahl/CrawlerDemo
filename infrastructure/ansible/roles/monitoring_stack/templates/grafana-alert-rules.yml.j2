@@ -1,0 +1,103 @@
+apiVersion: 1
+
+groups:
+  - orgId: 1
+    name: crawler-basic-alerts
+    folder: Crawler
+    interval: 1m
+    rules:
+      - uid: crawler-app-error-rate
+        title: Crawler App Error Rate High
+        condition: B
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: Error rate HTTP 5xx > 5% trong 5 phút.
+        labels:
+          severity: warning
+          layer: application
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: |
+                (
+                  sum(rate(crawler_http_errors_total[5m]))
+                  /
+                  clamp_min(sum(rate(crawler_http_requests_total[5m])), 0.001)
+                ) * 100
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              refId: B
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params: [5]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+
+      - uid: crawler-host-cpu-high
+        title: Host CPU High
+        condition: B
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: CPU utilization > 80% trong 5 phút.
+        labels:
+          severity: warning
+          layer: infrastructure
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              editorMode: code
+              expr: |
+                100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+              refId: A
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: A
+              refId: B
+              conditions:
+                - type: query
+                  evaluator:
+                    type: gt
+                    params: [80]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last

@@ -30,6 +30,10 @@ terraform {
       source  = "hashicorp/archive"
       version = "~> 2.0"
     }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.5"
+    }
   }
 }
 
@@ -58,12 +62,93 @@ locals {
   lambda_layer_zip   = "${path.module}/../../../aws/postgres_pure_layer.zip"
 }
 
+# Preserve state when refactoring module names/paths.
+moved {
+  from = module.networking
+  to   = module.vpc
+}
+
+moved {
+  from = module.worker
+  to   = module.ec2
+}
+
+moved {
+  from = module.storage.aws_db_subnet_group.main
+  to   = module.rds.aws_db_subnet_group.main
+}
+
+moved {
+  from = module.storage.aws_db_parameter_group.main
+  to   = module.rds.aws_db_parameter_group.main
+}
+
+moved {
+  from = module.storage.aws_db_instance.main
+  to   = module.rds.aws_db_instance.main
+}
+
+moved {
+  from = module.storage.aws_iam_role.rds_monitoring
+  to   = module.rds.aws_iam_role.rds_monitoring
+}
+
+moved {
+  from = module.storage.aws_iam_role_policy_attachment.rds_monitoring
+  to   = module.rds.aws_iam_role_policy_attachment.rds_monitoring
+}
+
+moved {
+  from = module.storage.aws_s3_bucket.raw
+  to   = module.s3.aws_s3_bucket.raw
+}
+
+moved {
+  from = module.storage.aws_s3_bucket_server_side_encryption_configuration.raw
+  to   = module.s3.aws_s3_bucket_server_side_encryption_configuration.raw
+}
+
+moved {
+  from = module.storage.aws_s3_bucket_public_access_block.raw
+  to   = module.s3.aws_s3_bucket_public_access_block.raw
+}
+
+moved {
+  from = module.storage.aws_s3_bucket_lifecycle_configuration.raw
+  to   = module.s3.aws_s3_bucket_lifecycle_configuration.raw
+}
+
+moved {
+  from = module.storage.aws_s3_bucket.exports
+  to   = module.s3.aws_s3_bucket.exports
+}
+
+moved {
+  from = module.storage.aws_s3_bucket_server_side_encryption_configuration.exports
+  to   = module.s3.aws_s3_bucket_server_side_encryption_configuration.exports
+}
+
+moved {
+  from = module.storage.aws_s3_bucket_public_access_block.exports
+  to   = module.s3.aws_s3_bucket_public_access_block.exports
+}
+
+moved {
+  from = module.storage.aws_s3_bucket_versioning.exports
+  to   = module.s3.aws_s3_bucket_versioning.exports
+}
+
+moved {
+  from = module.storage.aws_s3_bucket_lifecycle_configuration.exports
+  to   = module.s3.aws_s3_bucket_lifecycle_configuration.exports
+}
+
 # ═════════════════════════════════════════════════════════════════════════════
-# 1. Networking — VPC, subnets (Multi-AZ), IGW, NAT, S3 Endpoint
+# 1. VPC — subnets (Multi-AZ), IGW, NAT, S3 Endpoint
 # ═════════════════════════════════════════════════════════════════════════════
 
-module "networking" {
-  source = "../../modules/networking"
+module "vpc" {
+  source = "../../modules/vpc"
 
   project     = var.project
   environment = var.environment
@@ -92,13 +177,13 @@ module "security" {
   aws_region     = var.aws_region
   aws_account_id = var.aws_account_id
 
-  vpc_id   = module.networking.vpc_id
-  vpc_cidr = module.networking.vpc_cidr
+  vpc_id   = module.vpc.vpc_id
+  vpc_cidr = module.vpc.vpc_cidr
 
   db_password = var.db_password
 
   common_tags = local.common_tags
-  depends_on  = [module.networking]
+  depends_on  = [module.vpc]
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -120,19 +205,16 @@ module "queue" {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 4. Storage — RDS + S3
+# 4. Data Services — RDS + S3
 # ═════════════════════════════════════════════════════════════════════════════
 
-module "storage" {
-  source = "../../modules/storage"
+module "rds" {
+  source = "../../modules/rds"
 
-  project        = var.project
-  environment    = var.environment
-  aws_region     = var.aws_region
-  aws_account_id = var.aws_account_id
+  project     = var.project
+  environment = var.environment
 
-  vpc_id        = module.networking.vpc_id
-  db_subnet_ids = module.networking.db_subnet_ids
+  db_subnet_ids = module.vpc.db_subnet_ids
   sg_rds_id     = module.security.sg_rds_id
 
   kms_key_arn = module.security.kms_key_arn
@@ -144,7 +226,20 @@ module "storage" {
   db_password              = var.db_password
 
   common_tags = local.common_tags
-  depends_on  = [module.networking, module.security]
+  depends_on  = [module.vpc, module.security]
+}
+
+module "s3" {
+  source = "../../modules/s3"
+
+  project        = var.project
+  environment    = var.environment
+  aws_account_id = var.aws_account_id
+
+  kms_key_arn = module.security.kms_key_arn
+
+  common_tags = local.common_tags
+  depends_on  = [module.security]
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -158,15 +253,15 @@ module "lambda" {
   environment = var.environment
   aws_region  = var.aws_region
 
-  vpc_id             = module.networking.vpc_id
-  private_subnet_ids = module.networking.private_subnet_ids
+  vpc_id             = module.vpc.vpc_id
+  private_subnet_ids = module.vpc.private_subnet_ids
   sg_lambda_id       = module.security.sg_lambda_id
   lambda_role_arn    = module.security.lambda_role_arn
   sqs_main_queue_arn = module.queue.main_queue_arn
 
-  rds_endpoint = module.storage.rds_endpoint
-  db_name      = module.storage.db_name
-  db_username  = module.storage.db_username
+  rds_endpoint = module.rds.rds_endpoint
+  db_name      = module.rds.db_name
+  db_username  = module.rds.db_username
   db_password  = var.db_password
 
   lambda_memory_mb                    = 256
@@ -179,25 +274,25 @@ module "lambda" {
   lambda_source_file = local.lambda_source_file
   lambda_layer_zip   = local.lambda_layer_zip
 
-  s3_exports_bucket = module.storage.s3_exports_bucket
+  s3_exports_bucket = module.s3.s3_exports_bucket
   s3_exports_prefix = "auto/"
 
   common_tags = local.common_tags
-  depends_on  = [module.storage, module.queue, module.security]
+  depends_on  = [module.rds, module.s3, module.queue, module.security]
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 6. Worker — EC2 ASG (Multi-AZ, t3.micro, 1/1/2)
 # ═════════════════════════════════════════════════════════════════════════════
 
-module "worker" {
-  source = "../../modules/worker"
+module "ec2" {
+  source = "../../modules/ec2"
 
   project     = var.project
   environment = var.environment
   aws_region  = var.aws_region
 
-  private_subnet_ids        = module.networking.private_subnet_ids
+  private_subnet_ids        = module.vpc.private_subnet_ids
   sg_worker_id              = module.security.sg_worker_id
   iam_instance_profile_name = module.security.worker_instance_profile_name
   ec2_key_name              = var.worker_ec2_key_name
@@ -208,22 +303,22 @@ module "worker" {
   max_size         = 2 # spec
 
   sqs_queue_url               = module.queue.main_queue_url
-  s3_raw_bucket               = module.storage.s3_raw_bucket
-  s3_exports_bucket           = module.storage.s3_exports_bucket
+  s3_raw_bucket               = module.s3.s3_raw_bucket
+  s3_exports_bucket           = module.s3.s3_exports_bucket
   interval_seconds            = var.crawler_interval_seconds
   max_items_per_source        = 100
   claim_check_threshold_bytes = 204800 # 200 KB
-  web_db_host                 = module.storage.rds_endpoint
-  web_db_port                 = module.storage.rds_port
-  web_db_name                 = module.storage.db_name
-  web_db_user                 = module.storage.db_username
+  web_db_host                 = module.rds.rds_endpoint
+  web_db_port                 = module.rds.rds_port
+  web_db_name                 = module.rds.db_name
+  web_db_user                 = module.rds.db_username
   web_db_password             = var.db_password
   web_port                    = var.web_port
 
   log_retention_days = 30
   common_tags        = local.common_tags
 
-  depends_on = [module.networking, module.security, module.queue, module.storage]
+  depends_on = [module.vpc, module.security, module.queue, module.rds, module.s3]
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -233,7 +328,7 @@ module "worker" {
 resource "aws_security_group" "web_alb" {
   name        = "${local.name_prefix}-sg-web-alb"
   description = "Public ALB for crawler web dashboard"
-  vpc_id      = module.networking.vpc_id
+  vpc_id      = module.vpc.vpc_id
 
   ingress {
     description = "Allow HTTP from internet"
@@ -269,7 +364,7 @@ resource "aws_lb" "web" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = [aws_security_group.web_alb.id]
-  subnets            = module.networking.public_subnet_ids
+  subnets            = module.vpc.public_subnet_ids
 
   tags = merge(local.common_tags, { Name = "${local.name_prefix}-web-alb" })
 }
@@ -279,7 +374,7 @@ resource "aws_lb_target_group" "web" {
   port        = var.web_port
   protocol    = "HTTP"
   target_type = "instance"
-  vpc_id      = module.networking.vpc_id
+  vpc_id      = module.vpc.vpc_id
 
   health_check {
     enabled             = true
@@ -307,7 +402,7 @@ resource "aws_lb_listener" "web_http" {
 }
 
 resource "aws_autoscaling_attachment" "web_tg" {
-  autoscaling_group_name = module.worker.asg_name
+  autoscaling_group_name = module.ec2.asg_name
   lb_target_group_arn    = aws_lb_target_group.web.arn
 }
 
@@ -323,14 +418,69 @@ module "observability" {
   aws_region  = var.aws_region
 
   lambda_function_name = module.lambda.lambda_function_name
-  rds_identifier       = module.storage.rds_identifier
+  rds_identifier       = module.rds.rds_identifier
   dlq_name             = module.queue.dlq_name
-  worker_asg_name      = module.worker.asg_name
+  worker_asg_name      = module.ec2.asg_name
   worker_asg_max_size  = 2
 
   alert_email        = var.alert_email
   log_retention_days = 30
 
   common_tags = local.common_tags
-  depends_on  = [module.lambda, module.storage, module.queue, module.worker]
+  depends_on  = [module.lambda, module.rds, module.s3, module.queue, module.ec2]
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 9. Local runtime files (auto-generated after apply)
+# ═════════════════════════════════════════════════════════════════════════════
+
+resource "local_file" "runtime_env" {
+  count = var.generate_runtime_files ? 1 : 0
+
+  filename = "${path.module}/.runtime.env"
+  content = templatefile("${path.module}/env.tpl", {
+    aws_region                   = var.aws_region
+    aws_account_id               = var.aws_account_id
+    environment                  = var.environment
+    project                      = var.project
+    crawler_ecr_repo_url         = module.ec2.ecr_repository_url
+    crawler_web_url              = "http://${aws_lb.web.dns_name}"
+    crawler_sqs_queue_url        = module.queue.main_queue_url
+    crawler_s3_raw_bucket        = module.s3.s3_raw_bucket
+    crawler_s3_exports_bucket    = module.s3.s3_exports_bucket
+    crawler_db_host              = module.rds.rds_endpoint
+    crawler_db_port              = module.rds.rds_port
+    crawler_db_name              = module.rds.db_name
+    crawler_db_user              = module.rds.db_username
+    crawler_worker_asg_name      = module.ec2.asg_name
+    ansible_group                = "crawler_demo"
+    ansible_user                 = var.ansible_user
+    ansible_ssh_private_key_file = var.ansible_ssh_private_key_file
+    ansible_bastion_user         = var.ansible_bastion_user
+    ansible_bastion_host         = var.ansible_bastion_host
+    ansible_worker_host          = var.ansible_worker_host
+  })
+}
+
+resource "local_file" "ansible_inventory_ini" {
+  count = var.generate_runtime_files ? 1 : 0
+
+  filename = "${path.module}/../../../ansible/inventory/inventory.ini"
+  content = templatefile("${path.module}/../../../ansible/inventory/inventory.ini.tpl", {
+    ansible_worker_host          = var.ansible_worker_host
+    ansible_user                 = var.ansible_user
+    ansible_ssh_private_key_file = var.ansible_ssh_private_key_file
+    ansible_bastion_user         = var.ansible_bastion_user
+    ansible_bastion_host         = var.ansible_bastion_host
+    aws_region                   = var.aws_region
+    crawler_ecr_repo_url         = module.ec2.ecr_repository_url
+    crawler_cwa_log_group_name   = module.ec2.log_group_name
+    crawler_sqs_queue_url        = module.queue.main_queue_url
+    crawler_s3_raw_bucket        = module.s3.s3_raw_bucket
+    crawler_s3_exports_bucket    = module.s3.s3_exports_bucket
+    crawler_db_host              = module.rds.rds_endpoint
+    crawler_db_port              = module.rds.rds_port
+    crawler_db_name              = module.rds.db_name
+    crawler_db_user              = module.rds.db_username
+  })
 }

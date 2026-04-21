@@ -1,6 +1,12 @@
 # Ansible — cấu hình worker EC2 (Amazon Linux 2023)
 
 Playbook này triển khai **cùng một lớp cấu hình** như `user_data.sh.tpl` trong Terraform: Docker, CloudWatch Agent, hai container (`crawler-worker`, FastAPI `crawler-web`) và service chuyển log ra `/var/log/crawler.log`.
+Ngoài ra playbook còn triển khai monitoring stack qua Docker Compose:
+
+- **Grafana** (UI, dashboard, alert rule),
+- **Prometheus** (metrics hạ tầng + metrics ứng dụng từ `/metrics`),
+- **Loki + Promtail** (thu thập log từ `/var/log/crawler.log` và Docker container logs),
+- **Node Exporter + cAdvisor** (CPU/RAM/disk và container metrics).
 
 Dùng khi bạn muốn:
 
@@ -28,14 +34,23 @@ Dùng khi bạn muốn:
 ## Biến
 
 1. Điền inventory như trên (SSM hoặc SSH).
-2. Điền `inventory/group_vars/crawler_demo/main.yml` — có thể sinh phần lớn từ Terraform:
+2. `terraform apply` tự sinh `inventory/inventory.ini` (kèm PEM path, bastion, biến role) và `terraform/environments/demo/.runtime.env` nếu `generate_runtime_files=true` trong `terraform.tfvars`.
+
+3. Nếu muốn regenerate thủ công mà không apply lại, vẫn có thể chạy script:
+
+```bash
+chmod +x scripts/render-runtime-from-terraform.sh
+./scripts/render-runtime-from-terraform.sh
+```
+
+4. Nếu muốn giữ flow cũ qua group_vars YAML, vẫn có thể sinh snippet:
 
 ```bash
 chmod +x scripts/render-vars-from-terraform.sh
 ./scripts/render-vars-from-terraform.sh
 ```
 
-3. Mật khẩu DB: `cp inventory/group_vars/crawler_demo/vault.yml.example inventory/group_vars/crawler_demo/vault.yml`, sửa giá trị, rồi `ansible-vault encrypt inventory/group_vars/crawler_demo/vault.yml`.
+5. Mật khẩu DB: `cp inventory/group_vars/crawler_demo/vault.yml.example inventory/group_vars/crawler_demo/vault.yml`, sửa giá trị, rồi `ansible-vault encrypt inventory/group_vars/crawler_demo/vault.yml`.
 
 ## Chạy
 
@@ -80,6 +95,7 @@ ansible-playbook playbooks/site.yml --syntax-check
 
 - Instance profile EC2 cần quyền `ecr:GetAuthorizationToken` và pull image (đã cấu hình trong Terraform).
 - Playbook **restart** cả ba service systemd ở cuối — phù hợp triển khai có chủ đích, tránh chạy liên tục trên máy đang phục vụ nếu không cần.
+- Monitoring stack chạy tại `/opt/crawler-monitoring` (compose file + provisioning). Truy cập Grafana qua `http://<worker-host>:3000` (mặc định `admin/admin123!`).
 - **`NoneType` với SSM**: dùng `./run-site-venv.sh` (Python 3.11/3.12); cài gói trên máy remote bằng `raw`/`command` + `dnf` trong các role.
 
 ### `CERTIFICATE_VERIFY_FAILED` khi `ansible-galaxy`

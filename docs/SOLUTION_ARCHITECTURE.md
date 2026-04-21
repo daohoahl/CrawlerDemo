@@ -86,14 +86,14 @@ Danh sách URL mặc định nằm trong `src/crawlerdemo/config.py` (ví dụ n
 
 ### 1.5 Các kịch bản vận hành (A–E)
 
-| Kịch bản | Mô tả | Xử lý |
-|---|---|---|
-| **A — Normal** | Payload ≤ 200 KiB, Lambda xử lý thành công | Inline JSON → SQS → Lambda → INSERT → commit |
-| **B — Large payload** | Payload > 200 KiB (nhiều bài/nguồn lớn) | Claim Check: S3 upload → SQS pointer → Lambda fetch S3 → INSERT |
-| **C — Duplicate URL** | URL đã tồn tại trong DB | `ON CONFLICT DO NOTHING` — bỏ qua, không lỗi, không duplicate |
-| **D — Lambda failure** | Exception trong Lambda (DB down, parse error) | `ReportBatchItemFailures` → chỉ record lỗi quay lại SQS, tối đa 3 lần → DLQ |
-| **E — Worker crash** | EC2 instance bị terminate | ASG tự thay thế instance mới trong AZ khác; systemd `Restart=always` |
-| **F — Crawl tay trùng lặp** | Hai request `POST /api/crawl` chồng nhau | Request thứ hai nhận HTTP **409** (`busy: true` từ `GET /api/crawl/status`); chỉ một `run_once` tại một thời điểm trong process web |
+| Kịch bản                    | Mô tả                                         | Xử lý                                                                                                                               |
+| --------------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| **A — Normal**              | Payload ≤ 200 KiB, Lambda xử lý thành công    | Inline JSON → SQS → Lambda → INSERT → commit                                                                                        |
+| **B — Large payload**       | Payload > 200 KiB (nhiều bài/nguồn lớn)       | Claim Check: S3 upload → SQS pointer → Lambda fetch S3 → INSERT                                                                     |
+| **C — Duplicate URL**       | URL đã tồn tại trong DB                       | `ON CONFLICT DO NOTHING` — bỏ qua, không lỗi, không duplicate                                                                       |
+| **D — Lambda failure**      | Exception trong Lambda (DB down, parse error) | `ReportBatchItemFailures` → chỉ record lỗi quay lại SQS, tối đa 3 lần → DLQ                                                         |
+| **E — Worker crash**        | EC2 instance bị terminate                     | ASG tự thay thế instance mới trong AZ khác; systemd `Restart=always`                                                                |
+| **F — Crawl tay trùng lặp** | Hai request `POST /api/crawl` chồng nhau      | Request thứ hai nhận HTTP **409** (`busy: true` từ `GET /api/crawl/status`); chỉ một `run_once` tại một thời điểm trong process web |
 
 ### 1.6 Out-of-scope (Scope 1)
 

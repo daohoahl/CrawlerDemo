@@ -1,0 +1,69 @@
+---
+- name: Cài plugin docker compose
+  ansible.builtin.raw: /usr/bin/dnf install -y docker-compose-plugin
+  register: _dnf_docker_compose
+  changed_when: true
+  failed_when: (_dnf_docker_compose.rc | default(-1)) != 0
+
+- name: Tạo thư mục monitoring stack
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ monitoring_stack_dir }}"
+    - "{{ monitoring_stack_dir }}/prometheus"
+    - "{{ monitoring_stack_dir }}/loki"
+    - "{{ monitoring_stack_dir }}/promtail"
+    - "{{ monitoring_stack_dir }}/grafana"
+    - "{{ monitoring_stack_dir }}/grafana/provisioning"
+    - "{{ monitoring_stack_dir }}/grafana/provisioning/datasources"
+    - "{{ monitoring_stack_dir }}/grafana/provisioning/dashboards"
+    - "{{ monitoring_stack_dir }}/grafana/provisioning/alerting"
+    - "{{ monitoring_stack_dir }}/grafana/dashboards"
+
+- name: Render monitoring compose and config templates
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ monitoring_stack_dir }}/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { src: "docker-compose.monitoring.yml.j2", dest: "docker-compose.monitoring.yml", mode: "0644" }
+    - { src: "prometheus.yml.j2", dest: "prometheus/prometheus.yml", mode: "0644" }
+    - { src: "loki-config.yml.j2", dest: "loki/loki-config.yml", mode: "0644" }
+    - { src: "promtail-config.yml.j2", dest: "promtail/promtail-config.yml", mode: "0644" }
+    - { src: "grafana-datasources.yml.j2", dest: "grafana/provisioning/datasources/datasources.yml", mode: "0644" }
+    - { src: "grafana-dashboard-provider.yml.j2", dest: "grafana/provisioning/dashboards/dashboard-provider.yml", mode: "0644" }
+    - { src: "grafana-alert-rules.yml.j2", dest: "grafana/provisioning/alerting/alert-rules.yml", mode: "0644" }
+
+- name: Copy Grafana dashboards
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ monitoring_stack_dir }}/grafana/dashboards/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - { src: "dashboards/infrastructure-overview.json", dest: "infrastructure-overview.json" }
+    - { src: "dashboards/application-overview.json", dest: "application-overview.json" }
+
+- name: Start monitoring stack
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - docker-compose.monitoring.yml
+      - up
+      - -d
+      - --remove-orphans
+    chdir: "{{ monitoring_stack_dir }}"
+  register: _compose_up
+  changed_when: >-
+    'Creating' in (_compose_up.stdout | default('')) or
+    'Recreating' in (_compose_up.stdout | default('')) or
+    'Starting' in (_compose_up.stdout | default(''))

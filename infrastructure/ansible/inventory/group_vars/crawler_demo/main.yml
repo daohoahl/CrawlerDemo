@@ -23,3 +23,8 @@ crawler_web_db_port: 5432
 crawler_web_db_name: crawlerdb
 crawler_web_db_user: crawler
 crawler_s3_exports_bucket: crawler-demo-exports-478111025341
+
+monitoring_grafana_port: 3000
+monitoring_grafana_admin_user: admin
+monitoring_grafana_admin_password: admin123!
+monitoring_webapp_metrics_host: host.docker.internal

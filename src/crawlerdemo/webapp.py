@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import threading
+import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -16,9 +17,10 @@ import psycopg
 from botocore.config import Config
 from botocore.exceptions import ClientError
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 
 
 @dataclass
@@ -56,6 +58,40 @@ logger = logging.getLogger("crawlerdemo.webapp")
 _crawl_lock = threading.Lock()
 _crawl_busy = False
 _crawl_last_error: str | None = None
+
+HTTP_REQUEST_TOTAL = Counter(
+    "crawler_http_requests_total",
+    "Total number of HTTP requests served by crawler webapp.",
+    ["method", "path", "status"],
+)
+HTTP_ERROR_TOTAL = Counter(
+    "crawler_http_errors_total",
+    "Total number of HTTP responses with status >= 500.",
+    ["method", "path", "status"],
+)
+HTTP_REQUEST_DURATION_SECONDS = Histogram(
+    "crawler_http_request_duration_seconds",
+    "HTTP request latency in seconds.",
+    ["method", "path"],
+)
+
+
+@app.middleware("http")
+async def prometheus_http_metrics(request: Request, call_next):
+    method = request.method
+    path = request.url.path
+    start = time.perf_counter()
+    status = "500"
+    try:
+        response = await call_next(request)
+        status = str(response.status_code)
+        return response
+    finally:
+        elapsed = time.perf_counter() - start
+        HTTP_REQUEST_TOTAL.labels(method=method, path=path, status=status).inc()
+        HTTP_REQUEST_DURATION_SECONDS.labels(method=method, path=path).observe(elapsed)
+        if int(status) >= 500:
+            HTTP_ERROR_TOTAL.labels(method=method, path=path, status=status).inc()
 
 
 def _exports_bucket() -> str:
@@ -173,6 +209,11 @@ def health() -> dict[str, str]:
     RDS-dependent checks live under /health/ready.
     """
     return {"status": "ok"}
+
+
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/health/ready")

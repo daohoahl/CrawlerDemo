@@ -89,8 +89,6 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu" {
 # ── Alarm: ASG reached max capacity ─────────────────────────────────────────
 
 resource "aws_cloudwatch_metric_alarm" "asg_at_max" {
-  count = var.worker_asg_name == "" ? 0 : 1
-
   alarm_name          = "${local.name_prefix}-worker-asg-at-max"
   alarm_description   = "Worker ASG is running at max_size - consider raising the cap"
   namespace           = "AWS/AutoScaling"

@@ -5,33 +5,33 @@
 
 output "rds_endpoint" {
   description = "RDS endpoint (plug into the Lambda RDS_HOST)"
-  value       = module.storage.rds_endpoint
+  value       = module.rds.rds_endpoint
   sensitive   = true
 }
 
 output "rds_port" {
   description = "RDS port (Ansible / clients)"
-  value       = module.storage.rds_port
+  value       = module.rds.rds_port
 }
 
 output "db_name" {
   description = "PostgreSQL database name"
-  value       = module.storage.db_name
+  value       = module.rds.db_name
 }
 
 output "db_username" {
   description = "PostgreSQL master username"
-  value       = module.storage.db_username
+  value       = module.rds.db_username
 }
 
 output "s3_raw_bucket" {
   description = "S3 bucket used by the Claim-Check pattern (raw HTML offload)"
-  value       = module.storage.s3_raw_bucket
+  value       = module.s3.s3_raw_bucket
 }
 
 output "s3_exports_bucket" {
   description = "S3 bucket for CSV / JSON exports"
-  value       = module.storage.s3_exports_bucket
+  value       = module.s3.s3_exports_bucket
 }
 
 output "sqs_queue_url" {
@@ -51,27 +51,27 @@ output "lambda_function_name" {
 
 output "ecr_repository_url" {
   description = "ECR repository to push the worker image to"
-  value       = module.worker.ecr_repository_url
+  value       = module.ec2.ecr_repository_url
 }
 
 output "worker_cloudwatch_log_group_name" {
   description = "CloudWatch Logs group for worker EC2 (Ansible / observability)"
-  value       = module.worker.log_group_name
+  value       = module.ec2.log_group_name
 }
 
 output "worker_asg_name" {
   description = "Worker Auto Scaling Group name"
-  value       = module.worker.asg_name
+  value       = module.ec2.asg_name
 }
 
 output "worker_launch_template_key_name" {
   description = "Key pair on worker Launch Template — if set but EC2 instance shows no key, the instance was launched from an older LT; start an instance refresh or terminate the instance."
-  value       = module.worker.launch_template_key_name
+  value       = module.ec2.launch_template_key_name
 }
 
 output "nat_gateway_ip" {
   description = "NAT Gateway public IP - whitelist this on crawl targets if needed"
-  value       = module.networking.nat_gateway_ip
+  value       = module.vpc.nat_gateway_ip
 }
 
 output "cloudwatch_dashboard_url" {

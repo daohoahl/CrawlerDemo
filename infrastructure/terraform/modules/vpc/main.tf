@@ -1,5 +1,5 @@
 # =============================================================================
-# MODULE: networking
+# MODULE: vpc
 #
 # Creates a Multi-AZ VPC:
 #   - Public subnets     : NAT Gateway, future bastion hosts
@@ -14,7 +14,7 @@
 
 locals {
   name_prefix = "${var.project}-${var.environment}"
-  tags        = merge(var.common_tags, { Module = "networking" })
+  tags        = merge(var.common_tags, { Module = "vpc" })
 }
 
 # ── VPC ──────────────────────────────────────────────────────────────────────

@@ -306,7 +306,7 @@ module "ec2" {
   s3_raw_bucket               = module.s3.s3_raw_bucket
   s3_exports_bucket           = module.s3.s3_exports_bucket
   interval_seconds            = var.crawler_interval_seconds
-  max_items_per_source        = 100
+  max_items_per_source        = 30
   claim_check_threshold_bytes = 204800 # 200 KB
   web_db_host                 = module.rds.rds_endpoint
   web_db_port                 = module.rds.rds_port
@@ -431,6 +431,26 @@ module "observability" {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
+# 8.5 Backup — pg_dump target bucket + IAM for EC2 worker
+# ═════════════════════════════════════════════════════════════════════════════
+
+module "backup" {
+  source = "../../modules/backup"
+
+  project                    = var.project
+  environment                = var.environment
+  aws_account_id             = var.aws_account_id
+  kms_key_arn                = module.security.kms_key_arn
+  ec2_instance_role_name     = module.security.worker_role_name
+  retention_days             = var.backup_retention_days
+  sns_alarm_topic_arn        = module.observability.sns_topic_arn
+  enable_backup_missed_alarm = true
+
+  common_tags = local.common_tags
+  depends_on  = [module.security, module.observability]
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
 # 9. Local runtime files (auto-generated after apply)
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -448,6 +468,7 @@ resource "local_file" "runtime_env" {
     crawler_sqs_queue_url        = module.queue.main_queue_url
     crawler_s3_raw_bucket        = module.s3.s3_raw_bucket
     crawler_s3_exports_bucket    = module.s3.s3_exports_bucket
+    crawler_s3_backup_bucket     = module.backup.bucket_name
     crawler_db_host              = module.rds.rds_endpoint
     crawler_db_port              = module.rds.rds_port
     crawler_db_name              = module.rds.db_name
@@ -478,6 +499,7 @@ resource "local_file" "ansible_inventory_ini" {
     crawler_sqs_queue_url        = module.queue.main_queue_url
     crawler_s3_raw_bucket        = module.s3.s3_raw_bucket
     crawler_s3_exports_bucket    = module.s3.s3_exports_bucket
+    crawler_s3_backup_bucket     = module.backup.bucket_name
     crawler_db_host              = module.rds.rds_endpoint
     crawler_db_port              = module.rds.rds_port
     crawler_db_name              = module.rds.db_name

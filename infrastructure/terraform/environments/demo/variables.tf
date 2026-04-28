@@ -43,12 +43,22 @@ variable "db_instance_class" {
 }
 
 variable "db_backup_retention_days" {
-  description = "RDS automated backup retention days (set 1 for Free Tier compatibility)"
+  description = "RDS automated backup retention days. Free Tier: backups are free up to DB allocated storage (20 GB). 7 days is still free for small DBs."
   type        = number
-  default     = 1
+  default     = 7
   validation {
-    condition     = var.db_backup_retention_days >= 0 && var.db_backup_retention_days <= 35
-    error_message = "db_backup_retention_days must be between 0 and 35."
+    condition     = var.db_backup_retention_days >= 1 && var.db_backup_retention_days <= 35
+    error_message = "db_backup_retention_days must be between 1 and 35."
+  }
+}
+
+variable "backup_retention_days" {
+  description = "Retention (days) for pg_dump objects in the backup S3 bucket. Short default to stay within free tier S3 allowance."
+  type        = number
+  default     = 7
+  validation {
+    condition     = var.backup_retention_days >= 1 && var.backup_retention_days <= 90
+    error_message = "backup_retention_days must be between 1 and 90."
   }
 }
 
@@ -133,7 +143,7 @@ variable "ansible_bastion_host" {
 }
 
 variable "ansible_worker_host" {
-  description = "Worker private IP/hostname for generated Ansible inventory.ini"
+  description = "Worker private IP/hostname for generated inventory.ini (optional, static SSH only)"
   type        = string
-  default     = "10.0.12.10"
+  default     = ""
 }

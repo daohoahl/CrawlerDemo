@@ -13,6 +13,7 @@ CRAWLER_WEB_URL=${crawler_web_url}
 CRAWLER_SQS_QUEUE_URL=${crawler_sqs_queue_url}
 CRAWLER_S3_RAW_BUCKET=${crawler_s3_raw_bucket}
 CRAWLER_S3_EXPORTS_BUCKET=${crawler_s3_exports_bucket}
+CRAWLER_S3_BACKUP_BUCKET=${crawler_s3_backup_bucket}
 CRAWLER_DB_HOST=${crawler_db_host}
 CRAWLER_DB_PORT=${crawler_db_port}
 CRAWLER_DB_NAME=${crawler_db_name}

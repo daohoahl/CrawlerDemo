@@ -47,3 +47,8 @@ output "worker_role_arn" {
   value       = aws_iam_role.worker.arn
   description = "ARN of the EC2 worker IAM role"
 }
+
+output "worker_role_name" {
+  value       = aws_iam_role.worker.name
+  description = "Name of the EC2 worker IAM role (for external policy attachment)"
+}

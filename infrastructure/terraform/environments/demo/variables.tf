@@ -43,12 +43,12 @@ variable "db_instance_class" {
 }
 
 variable "db_backup_retention_days" {
-  description = "RDS automated backup retention days. Free Tier: backups are free up to DB allocated storage (20 GB). 7 days is still free for small DBs."
+  description = "RDS automated backup retention days. Set 0 to disable automated backups for restrictive Free Tier accounts."
   type        = number
-  default     = 7
+  default     = 0
   validation {
-    condition     = var.db_backup_retention_days >= 1 && var.db_backup_retention_days <= 35
-    error_message = "db_backup_retention_days must be between 1 and 35."
+    condition     = var.db_backup_retention_days >= 0 && var.db_backup_retention_days <= 35
+    error_message = "db_backup_retention_days must be between 0 and 35."
   }
 }
 
